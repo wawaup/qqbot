@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 def _item_line(i: int, p: "Product") -> str:
     price = f" {p.price}r" if p.price else ""
-    return f"{i}.{price} {p.title}\n   {p.url}\n"
+    return f"{i}.{price} {p.title}   {p.url}\n"
 
 
 def format_product_menu(products: dict[str, "Product"]) -> str:
@@ -25,7 +25,7 @@ def format_product_menu(products: dict[str, "Product"]) -> str:
 
     lines = ["📋 商品清单"]
     for cat_name, items in by_category.items():
-        lines.append(f"\n【{cat_name}】")
+        lines.append(f"\n【{cat_name}】\n")
         for i, p in enumerate(items, 1):
             lines.append(_item_line(i, p))
 
