@@ -1,6 +1,3 @@
-"""
-消息格式化：将商品数据转成 QQ 群消息文本。
-"""
 from collections import defaultdict
 from typing import TYPE_CHECKING
 
@@ -13,8 +10,15 @@ def _item_line(i: int, p: "Product") -> str:
     return f"{i}.{price} {p.title}   {p.url}\n"
 
 
+def _notice_lines(products: list["Product"]) -> list[str]:
+    lines = []
+    for p in products:
+        price = f" {p.price}r" if p.price else ""
+        lines.append(f"\n{price} {p.title}\n   {p.url}\n")
+    return lines
+
+
 def format_product_menu(products: dict[str, "Product"]) -> str:
-    """生成全量商品清单（分类展示，仅含有货）。"""
     by_category: dict[str, list] = defaultdict(list)
     for p in products.values():
         if p.in_stock:
@@ -23,13 +27,18 @@ def format_product_menu(products: dict[str, "Product"]) -> str:
     if not by_category:
         return "当前没有有货商品，请稍后再查询～"
 
-    lines = ["📋 商品清单"]
+    parts = ["📋 商品清单"]
     for cat_name, items in by_category.items():
+<<<<<<< Updated upstream
         lines.append(f"\n【{cat_name}】\n")
+=======
+        block = [f"【{cat_name}】"]
+>>>>>>> Stashed changes
         for i, p in enumerate(items, 1):
-            lines.append(_item_line(i, p))
+            block.append(_item_line(i, p))
+        parts.append("\n".join(block).rstrip())
 
-    return "\n".join(lines).rstrip()
+    return "\n\n".join(parts)
 
 
 def format_category_products(
@@ -37,12 +46,8 @@ def format_category_products(
     categories: list[str],
     label: str,
 ) -> str:
-    """生成指定分类的有货商品列表（含价格）。"""
     cat_set = set(categories)
-    items = [
-        p for p in products.values()
-        if p.in_stock and p.category in cat_set
-    ]
+    items = [p for p in products.values() if p.in_stock and p.category in cat_set]
 
     if not items:
         return f"【{label}】暂时没有有货商品，补货时会通知～"
@@ -50,13 +55,12 @@ def format_category_products(
     lines = [f"【{label}】有货商品"]
     for i, p in enumerate(items, 1):
         lines.append(_item_line(i, p))
-    return "\n".join(lines)
+    return "\n".join(lines).rstrip()
 
 
 def format_restock_notice(products: list["Product"]) -> str:
-    """生成补货通知消息。"""
-    lines = ["🔔 补货通知"]
-    for p in products:
-        price = f" {p.price}r" if p.price else ""
-        lines.append(f"\n{price} {p.title}\n   {p.url}\n")
-    return "\n".join(lines)
+    return "\n".join(["🔔 补货通知"] + _notice_lines(products)).rstrip()
+
+
+def format_new_product_notice(products: list["Product"]) -> str:
+    return "\n".join(["🆕 新品上架"] + _notice_lines(products)).rstrip()

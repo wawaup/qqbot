@@ -43,13 +43,19 @@ def save_state(products: dict[str, "Product"]) -> None:
 
 def diff_states(
     old: dict[str, dict], new: dict[str, "Product"]
-) -> list["Product"]:
-    """返回本次新上架（之前缺货或不存在，现在有货）的商品列表。"""
-    newly_in_stock = []
+) -> tuple[list["Product"], list["Product"]]:
+    """返回 (补货列表, 新品列表)。
+    - 补货：之前存在但缺货，现在有货
+    - 新品：之前不存在（首次出现），现在有货
+    """
+    restocked = []
+    new_products = []
     for pid, product in new.items():
         if not product.in_stock:
             continue
         prev = old.get(pid)
-        if prev is None or not prev.get("in_stock", True):
-            newly_in_stock.append(product)
-    return newly_in_stock
+        if prev is None:
+            new_products.append(product)
+        elif not prev.get("in_stock", True):
+            restocked.append(product)
+    return restocked, new_products

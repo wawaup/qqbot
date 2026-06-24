@@ -5,7 +5,7 @@ import logging
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from config import SCAN_INTERVAL, SHOP_URL
+from config import NOTIFY_EXCLUDE_CATEGORIES, SCAN_INTERVAL, SHOP_URL
 from shop import scraper
 from storage import state
 
@@ -38,17 +38,22 @@ async def scan_and_notify(first_run: bool = False) -> None:
         state.save_state(current_products)
         return
 
-    newly_in_stock = state.diff_states(old_state, current_products)
+    restocked, new_products = state.diff_states(old_state, current_products)
+    restocked = [p for p in restocked if p.category not in NOTIFY_EXCLUDE_CATEGORIES]
+    new_products = [p for p in new_products if p.category not in NOTIFY_EXCLUDE_CATEGORIES]
     state.save_state(current_products)
 
     in_stock_count = sum(1 for p in current_products.values() if p.in_stock)
     logger.info(
         f"扫描完成：共 {len(current_products)} 个商品，"
-        f"有货 {in_stock_count} 个，新补货 {len(newly_in_stock)} 个"
+        f"有货 {in_stock_count} 个，补货 {len(restocked)} 个，新品 {len(new_products)} 个"
     )
 
-    if newly_in_stock and _bot_client is not None:
-        await _bot_client.send_restock_notice(newly_in_stock)
+    if _bot_client is not None:
+        if restocked:
+            await _bot_client.send_restock_notice(restocked)
+        if new_products:
+            await _bot_client.send_new_product_notice(new_products)
 
 
 def create_scheduler() -> AsyncIOScheduler:

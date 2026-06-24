@@ -227,15 +227,11 @@ class BotHandlers(botpy.Client):
         else:
             await _reply_text(message, reply_text)
 
-    async def send_restock_notice(self, products: list) -> None:
-        from bot.formatter import format_restock_notice
+    async def _broadcast(self, text: str, label: str, count: int) -> None:
         from config import GROUP_OPENIDS
-
         if not GROUP_OPENIDS:
-            logger.warning("GROUP_OPENIDS 未配置，无法发送补货通知")
+            logger.warning("GROUP_OPENIDS 未配置，无法发送通知")
             return
-
-        text = format_restock_notice(products)
         for group_openid in GROUP_OPENIDS:
             try:
                 await self.api.post_group_message(
@@ -243,6 +239,14 @@ class BotHandlers(botpy.Client):
                     msg_type=0,
                     content=text,
                 )
-                logger.info(f"[{group_openid}] 补货通知已发送：{len(products)} 个商品")
+                logger.info(f"[{group_openid}] {label}已发送：{count} 个商品")
             except Exception as e:
-                logger.error(f"[{group_openid}] 补货通知失败: {e}")
+                logger.error(f"[{group_openid}] {label}失败: {e}")
+
+    async def send_restock_notice(self, products: list) -> None:
+        from bot.formatter import format_restock_notice
+        await self._broadcast(format_restock_notice(products), "补货通知", len(products))
+
+    async def send_new_product_notice(self, products: list) -> None:
+        from bot.formatter import format_new_product_notice
+        await self._broadcast(format_new_product_notice(products), "新品通知", len(products))
