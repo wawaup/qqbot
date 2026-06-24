@@ -18,6 +18,14 @@ def _notice_lines(products: list["Product"]) -> list[str]:
     return lines
 
 
+def _notice_lines(products: list["Product"]) -> list[str]:
+    lines = []
+    for p in products:
+        price = f" {p.price}r" if p.price else ""
+        lines.append(f"\n{price} {p.title}\n   {p.url}\n")
+    return lines
+
+
 def format_product_menu(products: dict[str, "Product"]) -> str:
     by_category: dict[str, list] = defaultdict(list)
     for p in products.values():
@@ -30,7 +38,11 @@ def format_product_menu(products: dict[str, "Product"]) -> str:
     parts = ["📋 商品清单"]
     for cat_name, items in by_category.items():
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
         lines.append(f"\n【{cat_name}】\n")
+=======
+        block = [f"【{cat_name}】"]
+>>>>>>> Stashed changes
 =======
         block = [f"【{cat_name}】"]
 >>>>>>> Stashed changes
