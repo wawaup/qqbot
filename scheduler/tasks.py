@@ -2,12 +2,22 @@
 定时扫描任务：每 SCAN_INTERVAL 秒扫描店铺，检测补货并通知 QQ 群。
 """
 import logging
+from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import NOTIFY_EXCLUDE_CATEGORIES, SCAN_INTERVAL, SHOP_URL
 from shop import scraper
 from storage import state
+
+CST = timezone(timedelta(hours=8))
+QUIET_START = 0   # 00:00
+QUIET_END   = 9   # 09:00，不含（即 09:00 起正常发）
+
+
+def _in_quiet_hours() -> bool:
+    hour = datetime.now(CST).hour
+    return QUIET_START <= hour < QUIET_END
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +33,12 @@ async def scan_and_notify(first_run: bool = False) -> None:
     """扫描商店库存，有补货时发群消息。
 
     first_run=True 时只建立快照，不发通知（避免把全量商品误报为补货）。
+    静默时段（00:00-09:00）跳过扫描，9 点后首次扫描可捕获整夜的补货。
     """
+    if not first_run and _in_quiet_hours():
+        logger.debug("静默时段，跳过扫描")
+        return
+
     logger.info("开始扫描商店库存...")
     try:
         current_products = await scraper.scan_all(SHOP_URL)

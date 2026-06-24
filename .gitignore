@@ -1,6 +1,6 @@
 .env
 
-state.json
+botpy.log
 
 __pycache__/
 *.pyc

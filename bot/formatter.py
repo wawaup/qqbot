@@ -7,15 +7,7 @@ if TYPE_CHECKING:
 
 def _item_line(i: int, p: "Product") -> str:
     price = f" {p.price}r" if p.price else ""
-    return f"{i}.{price} {p.title}   {p.url}\n"
-
-
-def _notice_lines(products: list["Product"]) -> list[str]:
-    lines = []
-    for p in products:
-        price = f" {p.price}r" if p.price else ""
-        lines.append(f"\n{price} {p.title}\n   {p.url}\n")
-    return lines
+    return f"{i}.{price} {p.title}\n   {p.url}\n"
 
 
 def _notice_lines(products: list["Product"]) -> list[str]:
@@ -37,15 +29,7 @@ def format_product_menu(products: dict[str, "Product"]) -> str:
 
     parts = ["📋 商品清单"]
     for cat_name, items in by_category.items():
-<<<<<<< Updated upstream
-<<<<<<< Updated upstream
-        lines.append(f"\n【{cat_name}】\n")
-=======
         block = [f"【{cat_name}】"]
->>>>>>> Stashed changes
-=======
-        block = [f"【{cat_name}】"]
->>>>>>> Stashed changes
         for i, p in enumerate(items, 1):
             block.append(_item_line(i, p))
         parts.append("\n".join(block).rstrip())
