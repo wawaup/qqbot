@@ -3,6 +3,7 @@
 """
 import json
 import logging
+import random
 import re
 import traceback
 from pathlib import Path
@@ -267,7 +268,9 @@ class BotHandlers(botpy.Client):
         await _reply_text(message, format_search_results(term, results))
 
     async def _send_keyword_reply(self, message: GroupMessage, rule: dict):
-        reply_text = rule.get("reply", "")
+        # 支持 replies 数组（随机选一条）或单条 reply
+        replies = rule.get("replies")
+        reply_text = random.choice(replies) if replies else rule.get("reply", "")
         image_url = PICS_URLS.get(rule.get("image", ""), "")
         if image_url:
             await _reply_image(message, reply_text, image_url)
