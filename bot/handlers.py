@@ -11,7 +11,7 @@ import botpy
 from botpy.manage import GroupManageEvent
 from botpy.message import GroupMessage
 
-from bot.formatter import format_category_products, format_product_menu
+from bot.formatter import format_category_products, format_product_menu, format_search_results
 from config import BOT_OPENID, CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
 from storage.state import load_state
 
@@ -19,18 +19,27 @@ logger = logging.getLogger(__name__)
 
 MENU_KEYWORDS = {"menu", "清单", "菜单", "商品清单", "有什么", "卖什么"}
 
+# 搜索时剥离的末尾/开头询问词（按长度降序，先替换最长的）
+_QUERY_STRIP = re.compile(
+    r"(有没有|有货吗|有吗|有么|在吗|卖吗|能买吗|还有|怎么样|多少钱|什么价|价格|啥价)\s*$"
+    r"|^\s*(有没有|还有|求推荐)\s*"
+)
+
 HELP_TEXT = (
     "【曼波导购bot 使用指南】\n\n"
-    " 成品号新手教程：http://www.xtpu.asia/\n"
+    " 成品号新手教程：http://www.xtpu.asia/\n\n"
     "@我 发分类指令查有货商品：\n"
     "  推荐 / gpt正价 / 正价冲\n"
     "  gpt\n"
     "  接码\n"
     "  claude\n"
     "  gemini\n"
-    "  grok\n"
+    "  grok / 其他\n"
     "  苹果id / 邮箱服务\n"
     "  清单 / 菜单 / menu → 查看全部分类\n\n"
+    "@我 发商品关键词搜索有货商品：\n"
+    "  例：@bot codex / @bot plus / @bot 网页号\n"
+    "  支持「有没有」结尾：@bot codex有没有\n\n"
     "直接在群里发关键词可自动回复：\n"
     "  店铺链接 / 在哪买\n"
     "  质保首登 / 活多久 / 会封吗\n"
@@ -75,6 +84,17 @@ def _match_category_command(text: str) -> tuple[str, list[str]] | None:
         if cmd.lower() in text_lower:
             return cmd, categories
     return None
+
+
+def _extract_search_term(text: str) -> str:
+    """去掉首尾询问词，返回核心搜索关键词。"""
+    return _QUERY_STRIP.sub("", text).strip()
+
+
+def _search_by_title(products: dict, query: str) -> list:
+    """在有货商品标题中做大小写不敏感的子串搜索。"""
+    q = query.lower()
+    return [p for p in products.values() if p.in_stock and q in p.title.lower()]
 
 
 # 每条触发消息最多回复5条，用 msg_id 追踪当前 seq
@@ -167,11 +187,18 @@ class BotHandlers(botpy.Client):
             if any(kw in content for kw in MENU_KEYWORDS):
                 await self._send_menu(message)
             else:
-                match = _match_category_command(content)
-                if match:
-                    cmd, categories = match
+                cat_match = _match_category_command(content)
+                if cat_match:
+                    cmd, categories = cat_match
                     await self._send_category(message, cmd, categories)
                 else:
+                    # 标题关键词搜索：剥离询问词后在商品标题里匹配
+                    term = _extract_search_term(content)
+                    if term:
+                        results = _search_by_title(self._state_to_products(), term)
+                        if results:
+                            await self._send_search_results(message, term, results)
+                            return
                     await _reply_text(message, HELP_TEXT)
 
         except Exception:
@@ -194,11 +221,17 @@ class BotHandlers(botpy.Client):
                 if any(kw in clean for kw in MENU_KEYWORDS):
                     await self._send_menu(message)
                 else:
-                    match = _match_category_command(clean)
-                    if match:
-                        cmd, categories = match
+                    cat_match = _match_category_command(clean)
+                    if cat_match:
+                        cmd, categories = cat_match
                         await self._send_category(message, cmd, categories)
                     else:
+                        term = _extract_search_term(clean)
+                        if term:
+                            results = _search_by_title(self._state_to_products(), term)
+                            if results:
+                                await self._send_search_results(message, term, results)
+                                return
                         await _reply_text(message, HELP_TEXT)
             else:
                 rule = _match_keyword(content)
@@ -229,6 +262,9 @@ class BotHandlers(botpy.Client):
             message,
             format_category_products(self._state_to_products(), categories, cmd),
         )
+
+    async def _send_search_results(self, message: GroupMessage, term: str, results: list):
+        await _reply_text(message, format_search_results(term, results))
 
     async def _send_keyword_reply(self, message: GroupMessage, rule: dict):
         reply_text = rule.get("reply", "")

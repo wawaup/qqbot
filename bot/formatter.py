@@ -54,6 +54,13 @@ def format_category_products(
     return "\n".join(lines).rstrip()
 
 
+def format_search_results(query: str, products: list["Product"]) -> str:
+    lines = [f"🔍「{query}」有货商品\n"]
+    for i, p in enumerate(products, 1):
+        lines.append(_item_line(i, p))
+    return "\n".join(lines).rstrip()
+
+
 def format_restock_notice(products: list["Product"]) -> str:
     return "\n".join(["🔔 补货通知"] + _notice_lines(products)).rstrip()
 
