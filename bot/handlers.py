@@ -27,8 +27,8 @@ _QUERY_STRIP = re.compile(
 )
 
 HELP_TEXT = (
-    "【曼波导购bot 使用指南】\n\n"
-    " 成品号新手教程：http://www.xtpu.asia/\n\n"
+    "【曼波导购bot 使用指南】\n"
+    "成品号新手教程请看：https://www.xtpu.asia/#/\n\n"
     "@我 发分类指令查有货商品：\n"
     "  推荐 / gpt正价 / 正价冲\n"
     "  gpt\n"

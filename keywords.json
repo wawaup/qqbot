@@ -15,13 +15,13 @@
     "image": "pics/meme1.jpg"
   },
   {
-    "keywords": [ "用不了", "售后处理", "售后服务", "售后咨询"],
+    "keywords": [ "用不了怎么办", "售后处理", "售后服务", "售后咨询"],
     "reply": "遇到商品质保范围内的问题请带订单号和问题截图私聊群主，会尽快处理，感谢您的耐心等待～",
     "image": "pics/meme3.jpg"
   },
   {
     "keywords": [ "怎么登录","什么是反代","反代咋用","反代登录","反代教程","邮箱登录怎么","邮箱接码怎么","邮箱验证码咋弄","反代是什么","反代是啥"],
-    "reply": "1.邮件接码登录：常用于邮箱发货的商品，会提供提取邮箱网站或者邮箱接码网站。\n步骤是\n1）进入gpt官网https://chatgpt.com/ \n2）点击登录，选择邮箱登录，输入邮箱账号发送验证码 \n3）回到我们提供的网站接收验证码完成登录。\n\n2.反代登录：常用于codex使用，直接提供rt(refresh_token)、sub2api、cpa json的商品。\n步骤分两种:\n一种是授权登录：1）点击反代软件或网站的导入按钮\n2)按照软件页面的引导复制授权链接到浏览器登录，剩下步骤与邮件接码一致。\n二是直接导入token或者json:\n1）点击反代软件或网站的导入按钮\n2)选择导入token或json的方式，将提供的rt(refresh_token)、sub2api、cpa json凭证复制导入。选择其中一种格式的凭证即可。\n超详细教程：http://www.xtpu.asia/ \n反代详细说明加api文字教程：https://pay.ldxp.cn/item/ibs6fa",
+    "reply": "1.邮件接码登录：常用于邮箱发货的商品，会提供提取邮箱网站或者邮箱接码网站。\n步骤是\n1）进入gpt官网https://chatgpt.com/ \n2）点击登录，选择邮箱登录，输入邮箱账号发送验证码 \n3）回到我们提供的网站接收验证码完成登录。\n\n2.反代登录：常用于codex使用，直接提供rt(refresh_token)、sub2api、cpa json的商品。\n步骤分两种:\n一种是授权登录：1）点击反代软件或网站的导入按钮\n2)按照软件页面的引导复制授权链接到浏览器登录，剩下步骤与邮件接码一致。\n二是直接导入token或者json:\n1）点击反代软件或网站的导入按钮\n2)选择导入token或json的方式，将提供的rt(refresh_token)、sub2api、cpa json凭证复制导入。选择其中一种格式的凭证即可。\n超详细教程：https://www.xtpu.asia/#/ \n反代详细说明加api文字教程：https://pay.ldxp.cn/item/ibs6fa",
     "image": ""
   },
   {
