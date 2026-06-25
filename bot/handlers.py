@@ -11,6 +11,7 @@ from pathlib import Path
 import botpy
 from botpy.manage import GroupManageEvent
 from botpy.message import GroupMessage
+from botpy.types import message as msg_types
 
 from bot.formatter import format_category_products, format_product_menu, format_search_results
 from config import BOT_OPENID, CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
@@ -27,28 +28,27 @@ _QUERY_STRIP = re.compile(
 )
 
 HELP_TEXT = (
-    "【曼波导购bot 使用指南】\n"
-    "成品号新手教程请看：https://www.xtpu.asia/#/\n\n"
+    "# 曼波导购bot 使用指南\n\n"
+    "成品号新手教程：[点击查看](https://www.xtpu.asia/#/)\n\n"
+    "## 分类查询\n"
     "@我 发分类指令查有货商品：\n"
-    "  推荐 / gpt正价 / 正价冲\n"
-    "  gpt\n"
-    "  接码\n"
-    "  claude\n"
-    "  gemini\n"
-    "  grok / 其他\n"
-    "  苹果id / 邮箱服务\n"
-    "  清单 / 菜单 / menu → 查看全部分类\n\n"
+    "- 推荐 / gpt正价 / 正价冲\n"
+    "- gpt · 接码 · claude · gemini\n"
+    "- grok / 其他 · 苹果id / 邮箱服务\n"
+    "- 清单 / 菜单 / menu → 查看全部分类\n\n"
+    "## 关键词搜索\n"
     "@我 发商品关键词搜索有货商品：\n"
-    "  例：@bot codex / @bot plus / @bot 网页号\n"
-    "  支持「有没有」结尾：@bot codex有没有\n\n"
+    "- 例：@bot codex / @bot plus / @bot 网页号\n"
+    "- 支持「有没有」结尾：@bot codex有没有\n\n"
+    "## 自动回复\n"
     "直接在群里发关键词可自动回复：\n"
-    "  店铺链接 / 在哪买\n"
-    "  质保首登 / 活多久 / 会封吗\n"
-    "  哪里查订单 / 订单卡密\n"
-    "  售后 / 用不了\n"
-    "  怎么登录 / 反代 / 邮件接码\n\n"
-    "⚠️ 00:00-09:00 为免打扰时段，补货/新品通知暂停推送\n"
-    "该时段如需查看有货商品，请 @我 发分类指令"
+    "- 店铺链接 / 在哪买\n"
+    "- 质保首登 / 活多久 / 会封吗\n"
+    "- 哪里查订单 / 订单卡密\n"
+    "- 售后 / 用不了\n"
+    "- 怎么登录 / 反代 / 邮件接码\n\n"
+    "> ⚠️ 00:00-09:00 为免打扰时段，补货/新品通知暂停推送\n"
+    "> 该时段如需查看有货商品，请 @我 发分类指令"
 )
 
 _keywords_cache: list[dict] | None = None
@@ -107,13 +107,13 @@ def _next_seq(msg_id: str) -> int:
     return _seq[msg_id]
 
 
-async def _reply_text(message: GroupMessage, text: str) -> None:
+async def _reply_markdown(message: GroupMessage, text: str) -> None:
     await message._api.post_group_message(
         group_openid=message.group_openid,
-        msg_type=0,
+        msg_type=2,
         msg_id=message.id,
         msg_seq=_next_seq(message.id),
-        content=text,
+        markdown=msg_types.MarkdownPayload(content=text),
     )
 
 
@@ -121,7 +121,7 @@ async def _reply_image(message: GroupMessage, text: str, image_url: str) -> None
     try:
         # 先发文字
         if text:
-            await _reply_text(message, text)
+            await _reply_markdown(message, text)
         media = await message._api.post_group_file(
             group_openid=message.group_openid,
             file_type=1,
@@ -200,7 +200,7 @@ class BotHandlers(botpy.Client):
                         if results:
                             await self._send_search_results(message, term, results)
                             return
-                    await _reply_text(message, HELP_TEXT)
+                    await _reply_markdown(message, HELP_TEXT)
 
         except Exception:
             logger.error(f"[AT消息] 处理异常:\n{traceback.format_exc()}")
@@ -233,7 +233,7 @@ class BotHandlers(botpy.Client):
                             if results:
                                 await self._send_search_results(message, term, results)
                                 return
-                        await _reply_text(message, HELP_TEXT)
+                        await _reply_markdown(message, HELP_TEXT)
             else:
                 rule = _match_keyword(content)
                 if rule:
@@ -256,16 +256,16 @@ class BotHandlers(botpy.Client):
         }
 
     async def _send_menu(self, message: GroupMessage):
-        await _reply_text(message, format_product_menu(self._state_to_products()))
+        await _reply_markdown(message, format_product_menu(self._state_to_products()))
 
     async def _send_category(self, message: GroupMessage, cmd: str, categories: list[str]):
-        await _reply_text(
+        await _reply_markdown(
             message,
             format_category_products(self._state_to_products(), categories, cmd),
         )
 
     async def _send_search_results(self, message: GroupMessage, term: str, results: list):
-        await _reply_text(message, format_search_results(term, results))
+        await _reply_markdown(message, format_search_results(term, results))
 
     async def _send_keyword_reply(self, message: GroupMessage, rule: dict):
         # 支持 replies 数组（随机选一条）或单条 reply
@@ -275,7 +275,7 @@ class BotHandlers(botpy.Client):
         if image_url:
             await _reply_image(message, reply_text, image_url)
         else:
-            await _reply_text(message, reply_text)
+            await _reply_markdown(message, reply_text)
 
     async def _broadcast(self, text: str, label: str, count: int) -> None:
         from config import GROUP_OPENIDS
@@ -286,8 +286,8 @@ class BotHandlers(botpy.Client):
             try:
                 await self.api.post_group_message(
                     group_openid=group_openid,
-                    msg_type=0,
-                    content=text,
+                    msg_type=2,
+                    markdown=msg_types.MarkdownPayload(content=text),
                 )
                 logger.info(f"[{group_openid}] {label}已发送：{count} 个商品")
             except Exception as e:
