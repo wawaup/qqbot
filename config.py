@@ -5,6 +5,7 @@ load_dotenv()
 
 BOT_APPID = os.getenv("BOT_APPID", "")
 BOT_SECRET = os.getenv("BOT_SECRET", "")
+BOT_OPENID = os.getenv("BOT_OPENID", "")  # 机器人在群里的 member openid，用于过滤 @自己
 
 # 支持多群：逗号分隔，如 "openid1,openid2"
 GROUP_OPENIDS = [g.strip() for g in os.getenv("GROUP_OPENIDS", "").split(",") if g.strip()]

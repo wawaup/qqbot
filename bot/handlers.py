@@ -12,7 +12,7 @@ from botpy.manage import GroupManageEvent
 from botpy.message import GroupMessage
 
 from bot.formatter import format_category_products, format_product_menu
-from config import CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
+from config import BOT_OPENID, CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
 from storage.state import load_state
 
 logger = logging.getLogger(__name__)
@@ -180,8 +180,11 @@ class BotHandlers(botpy.Client):
         )
         try:
             content = (message.content or "").strip()
-            # QQ 群里 @机器人 实际以 GROUP_MESSAGE_CREATE 下发，内容带 <@!id>
-            if re.search(r"<@[^>]+>", content):
+            # QQ 群里 @机器人 实际以 GROUP_MESSAGE_CREATE 下发，内容带 <@botid>
+            # 只响应 @自己，忽略 @其他人的消息
+            bot_tag = f"<@{BOT_OPENID}>" if BOT_OPENID else None
+            is_at_bot = (bot_tag and bot_tag in content) or (not BOT_OPENID and bool(re.search(r"<@[^>]+>", content)))
+            if is_at_bot:
                 clean = re.sub(r"<@[^>]+>", "", content).strip()
                 if any(kw in clean for kw in MENU_KEYWORDS):
                     await self._send_menu(message)
