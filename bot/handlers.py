@@ -130,7 +130,12 @@ class BotHandlers(botpy.Client):
         logger.error(f"[{event_name}] 未捕获异常:\n{traceback.format_exc()}")
 
     async def on_ready(self):
-        """注册 group_message_create 的 parser 补丁（botpy 1.x 未内置）。"""
+        """首次连接成功，注册 group_message_create parser 补丁。"""
+        self._patch_group_message_parser()
+
+    async def on_resumed(self):
+        """Session timeout (4009) 后 Resume 重连成功，防御性地重新注册补丁。"""
+        logger.info("Resume 重连成功，重新注册 parser 补丁")
         self._patch_group_message_parser()
 
     def _patch_group_message_parser(self):
