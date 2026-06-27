@@ -8,10 +8,13 @@ import re
 import traceback
 from pathlib import Path
 
+import jieba
 import botpy
 from botpy.manage import GroupManageEvent
 from botpy.message import GroupMessage
 from botpy.types import message as msg_types
+
+jieba.initialize()  # 启动时预加载词典，避免首次查询阻塞事件循环
 
 from bot.formatter import format_category_products, format_product_menu, format_search_results
 from config import BOT_OPENID, CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
@@ -21,11 +24,25 @@ logger = logging.getLogger(__name__)
 
 MENU_KEYWORDS = {"menu", "清单", "菜单", "商品清单", "有什么", "卖什么"}
 
-# 搜索时剥离的末尾/开头询问词（按长度降序，先替换最长的）
+# 直接触发使用指南的词（@bot 后面只有这些词，或什么都没跟）
+HELP_TRIGGERS = {"使用指南", "指令", "help", "帮助", "怎么用"}
+
+# 搜索时剥离的末尾/开头询问词
 _QUERY_STRIP = re.compile(
-    r"(有没有|有货吗|有吗|有么|在吗|卖吗|能买吗|还有|怎么样|多少钱|什么价|价格|啥价)\s*$"
-    r"|^\s*(有没有|还有|求推荐)\s*"
+    r"(有没有|有货吗|有吗|有么|在吗|卖吗|能买吗|能用吗|还有|怎么样|多少钱|什么价|价格|啥价|咋样|行吗|好用吗)\s*$"
+    r"|^\s*(有没有|还有|求推荐|想买个|买个|想买)\s*"
 )
+
+# jieba 分词后过滤掉的虚词/查询词
+_STOP_TOKENS = frozenset({
+    "有没有", "有货吗", "有吗", "有么", "在吗", "卖吗", "能买吗",
+    "有货", "缺货", "求推荐", "推荐", "怎么样", "如何", "哪里",
+    "有", "吗", "么", "的", "了", "呢", "啊", "哦", "嗯", "哈",
+    "是", "也", "都", "就", "还", "又", "再", "最", "很", "真",
+    "这", "那", "这个", "那个", "什么", "哪个", "哪些", "多少",
+    "想买", "想买个", "买个", "可以", "买", "找", "看", "要", "想", "用", "上", "能用", "咋样",
+    "多少钱", "什么价", "价格", "啥价",
+})
 
 HELP_TEXT = (
     "# 曼波导购bot 使用指南\n\n"
@@ -88,14 +105,37 @@ def _match_category_command(text: str) -> tuple[str, list[str]] | None:
 
 
 def _extract_search_term(text: str) -> str:
-    """去掉首尾询问词，返回核心搜索关键词。"""
+    """去掉首尾询问词，返回核心搜索关键词（用于整体子串匹配）。"""
     return _QUERY_STRIP.sub("", text).strip()
+
+
+def _extract_search_tokens(text: str) -> list[str]:
+    """jieba 分词后过滤停用词，返回有意义的词列表（用于多词搜索）。"""
+    return [t for t in jieba.lcut(text) if t.strip() and t not in _STOP_TOKENS]
 
 
 def _search_by_title(products: dict, query: str) -> list:
     """在有货商品标题中做大小写不敏感的子串搜索。"""
     q = query.lower()
     return [p for p in products.values() if p.in_stock and q in p.title.lower()]
+
+
+def _search_by_tokens(products: dict, tokens: list[str]) -> list:
+    """按分词结果搜索：优先 AND（所有词都命中），无结果则 OR（任一词命中）。"""
+    if not tokens:
+        return []
+    in_stock = [p for p in products.values() if p.in_stock]
+    tl = [t.lower() for t in tokens]
+    results = [p for p in in_stock if all(t in p.title.lower() for t in tl)]
+    if results:
+        return results
+    seen: set[str] = set()
+    or_results: list = []
+    for p in in_stock:
+        if p.id not in seen and any(t in p.title.lower() for t in tl):
+            or_results.append(p)
+            seen.add(p.id)
+    return or_results
 
 
 # 每条触发消息最多回复5条，用 msg_id 追踪当前 seq
@@ -177,31 +217,13 @@ class BotHandlers(botpy.Client):
 
     async def on_group_at_message_create(self, message: GroupMessage):
         """有人 @机器人 时触发。"""
-        # 记录完整原始消息，方便排查问题
         logger.info(
             f"[AT消息] group_openid={message.group_openid} "
             f"id={message.id} content={message.content!r}"
         )
         try:
-            content = re.sub(r"<@[^>]+>", "", message.content).strip()
-
-            if any(kw in content for kw in MENU_KEYWORDS):
-                await self._send_menu(message)
-            else:
-                cat_match = _match_category_command(content)
-                if cat_match:
-                    cmd, categories = cat_match
-                    await self._send_category(message, cmd, categories)
-                else:
-                    # 标题关键词搜索：剥离询问词后在商品标题里匹配
-                    term = _extract_search_term(content)
-                    if term:
-                        results = _search_by_title(self._state_to_products(), term)
-                        if results:
-                            await self._send_search_results(message, term, results)
-                            return
-                    await _reply_markdown(message, HELP_TEXT)
-
+            clean = re.sub(r"<@[^>]+>", "", message.content).strip()
+            await self._handle_at_command(message, clean)
         except Exception:
             logger.error(f"[AT消息] 处理异常:\n{traceback.format_exc()}")
 
@@ -223,21 +245,7 @@ class BotHandlers(botpy.Client):
             is_reference_reply = bool(getattr(message, "message_reference", None))
             if is_at_bot and not is_reference_reply:
                 clean = re.sub(r"<@[^>]+>", "", content).strip()
-                if any(kw in clean for kw in MENU_KEYWORDS):
-                    await self._send_menu(message)
-                else:
-                    cat_match = _match_category_command(clean)
-                    if cat_match:
-                        cmd, categories = cat_match
-                        await self._send_category(message, cmd, categories)
-                    else:
-                        term = _extract_search_term(clean)
-                        if term:
-                            results = _search_by_title(self._state_to_products(), term)
-                            if results:
-                                await self._send_search_results(message, term, results)
-                                return
-                        await _reply_markdown(message, HELP_TEXT)
+                await self._handle_at_command(message, clean)
             else:
                 if is_reference_reply and is_at_bot:
                     logger.info("[群消息] 引用回复含 @bot，忽略指令，仅做关键词匹配")
@@ -246,6 +254,39 @@ class BotHandlers(botpy.Client):
                     await self._send_keyword_reply(message, rule)
         except Exception:
             logger.error(f"[群消息] 处理异常:\n{traceback.format_exc()}")
+
+    async def _handle_at_command(self, message: GroupMessage, clean: str) -> None:
+        """处理 @bot 后的指令文本（已剥离 @tag）。"""
+        # 空内容 或 明确要帮助 → 使用指南
+        if not clean or clean in HELP_TRIGGERS:
+            await _reply_markdown(message, HELP_TEXT)
+            return
+
+        # 全量菜单
+        if any(kw in clean for kw in MENU_KEYWORDS):
+            await self._send_menu(message)
+            return
+
+        # 分类指令
+        cat_match = _match_category_command(clean)
+        if cat_match:
+            cmd, categories = cat_match
+            await self._send_category(message, cmd, categories)
+            return
+
+        # 关键词搜索：先整体匹配，再 jieba 分词多词匹配
+        products = self._state_to_products()
+        term = _extract_search_term(clean)
+        results = _search_by_title(products, term) if term else []
+        if not results:
+            tokens = _extract_search_tokens(clean)
+            results = _search_by_tokens(products, tokens)
+
+        display = term or clean
+        if results:
+            await self._send_search_results(message, display, results)
+        else:
+            await _reply_markdown(message, f"暂时没找到「{display}」相关的有货商品～")
 
     def _state_to_products(self) -> dict:
         from shop.models import Product
