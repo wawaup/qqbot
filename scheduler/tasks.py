@@ -119,6 +119,19 @@ async def flush_gpt_pending() -> None:
     if not restocked and not new_products:
         return
 
+    # 用最新快照二次验证：下架或已售罄的不通知
+    latest = state.load_state()
+    def _still_in_stock(p) -> bool:
+        entry = latest.get(p.id)
+        return entry is not None and entry.get("in_stock", False)
+
+    before_r, before_n = len(restocked), len(new_products)
+    restocked = [p for p in restocked if _still_in_stock(p)]
+    new_products = [p for p in new_products if _still_in_stock(p)]
+    filtered = (before_r - len(restocked)) + (before_n - len(new_products))
+    if filtered:
+        logger.info(f"GPT 批量通知：过滤掉 {filtered} 个已下架/售罄商品")
+
     logger.info(f"GPT 批量通知：补货 {len(restocked)} 个，新品 {len(new_products)} 个")
     if _bot_client is not None:
         if restocked:

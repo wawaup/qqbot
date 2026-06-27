@@ -209,7 +209,8 @@ class BotHandlers(botpy.Client):
         """群内消息：带 <@!> 的路由到 AT 处理，否则做关键词匹配。"""
         logger.info(
             f"[群消息] group_openid={message.group_openid} "
-            f"content={message.content!r}"
+            f"content={message.content!r} "
+            f"reference={getattr(message, 'message_reference', None)!r}"
         )
         try:
             content = (message.content or "").strip()
@@ -217,7 +218,10 @@ class BotHandlers(botpy.Client):
             # 只响应 @自己，忽略 @其他人的消息
             bot_tag = f"<@{BOT_OPENID}>" if BOT_OPENID else None
             is_at_bot = (bot_tag and bot_tag in content) or (not BOT_OPENID and bool(re.search(r"<@[^>]+>", content)))
-            if is_at_bot:
+            # 引用回复时 message_reference 非空，此时 @bot 可能来自被引用的旧消息，
+            # 不当作主动指令处理，只做关键词匹配
+            is_reference_reply = bool(getattr(message, "message_reference", None))
+            if is_at_bot and not is_reference_reply:
                 clean = re.sub(r"<@[^>]+>", "", content).strip()
                 if any(kw in clean for kw in MENU_KEYWORDS):
                     await self._send_menu(message)
@@ -235,6 +239,8 @@ class BotHandlers(botpy.Client):
                                 return
                         await _reply_markdown(message, HELP_TEXT)
             else:
+                if is_reference_reply and is_at_bot:
+                    logger.info("[群消息] 引用回复含 @bot，忽略指令，仅做关键词匹配")
                 rule = _match_keyword(content)
                 if rule:
                     await self._send_keyword_reply(message, rule)
