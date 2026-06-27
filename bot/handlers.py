@@ -40,8 +40,10 @@ _STOP_TOKENS = frozenset({
     "有", "吗", "么", "的", "了", "呢", "啊", "哦", "嗯", "哈",
     "是", "也", "都", "就", "还", "又", "再", "最", "很", "真",
     "这", "那", "这个", "那个", "什么", "哪个", "哪些", "多少",
-    "想买", "想买个", "买个", "可以", "买", "找", "看", "要", "想", "用", "上", "能用", "咋样",
+    "想买", "想买个", "买个", "找个", "找下", "帮我找", "帮找", "帮我", "帮",
+    "可以", "买", "找", "看", "要", "想", "用", "上", "能用", "咋样",
     "多少钱", "什么价", "价格", "啥价",
+    "号", "款", "个", "种", "类", "些",
 })
 
 HELP_TEXT = (
@@ -53,10 +55,9 @@ HELP_TEXT = (
     "- gpt · 接码 · claude · gemini\n"
     "- grok / 其他 · 苹果id / 邮箱服务\n"
     "- 清单 / 菜单 / menu → 查看全部分类\n\n"
-    "## 关键词搜索\n"
-    "@我 发商品关键词搜索有货商品：\n"
-    "- 例：@bot codex / @bot plus / @bot 网页号\n"
-    "- 支持「有没有」结尾：@bot codex有没有\n\n"
+    "## 商品搜索\n"
+    "@我 直接说想找什么，口语化也没问题：\n"
+    "- @bot plus / @bot 有没有codex / @bot 想买个网页号\n\n"
     "## 自动回复\n"
     "直接在群里发关键词可自动回复：\n"
     "- 店铺链接 / 在哪买\n"
@@ -105,13 +106,22 @@ def _match_category_command(text: str) -> tuple[str, list[str]] | None:
 
 
 def _extract_search_term(text: str) -> str:
-    """去掉首尾询问词，返回核心搜索关键词（用于整体子串匹配）。"""
-    return _QUERY_STRIP.sub("", text).strip()
+    """去掉首尾询问词，返回核心搜索关键词（用于整体子串匹配，统一小写）。"""
+    return _QUERY_STRIP.sub("", text).strip().lower()
 
 
 def _extract_search_tokens(text: str) -> list[str]:
-    """jieba 分词后过滤停用词，返回有意义的词列表（用于多词搜索）。"""
-    return [t for t in jieba.lcut(text) if t.strip() and t not in _STOP_TOKENS]
+    """jieba 分词后过滤停用词和单个汉字，返回有意义的词列表（用于多词搜索）。"""
+    result = []
+    for t in jieba.lcut(text):
+        t = t.strip()
+        if not t or t in _STOP_TOKENS:
+            continue
+        # 单个汉字太泛，丢弃；单个英文/数字保留（如 "4", "o"）
+        if len(t) == 1 and '一' <= t <= '鿿':
+            continue
+        result.append(t.lower())  # 统一小写，匹配时不区分大小写
+    return result
 
 
 def _search_by_title(products: dict, query: str) -> list:
@@ -229,20 +239,20 @@ class BotHandlers(botpy.Client):
 
     async def on_group_message_create(self, message: GroupMessage):
         """群内消息：带 <@!> 的路由到 AT 处理，否则做关键词匹配。"""
-        logger.info(
-            f"[群消息] group_openid={message.group_openid} "
-            f"content={message.content!r} "
-            f"reference={getattr(message, 'message_reference', None)!r}"
-        )
         try:
             content = (message.content or "").strip()
             # QQ 群里 @机器人 实际以 GROUP_MESSAGE_CREATE 下发，内容带 <@botid>
             # 只响应 @自己，忽略 @其他人的消息
             bot_tag = f"<@{BOT_OPENID}>" if BOT_OPENID else None
             is_at_bot = (bot_tag and bot_tag in content) or (not BOT_OPENID and bool(re.search(r"<@[^>]+>", content)))
-            # 引用回复时 message_reference 非空，此时 @bot 可能来自被引用的旧消息，
-            # 不当作主动指令处理，只做关键词匹配
-            is_reference_reply = bool(getattr(message, "message_reference", None))
+            # 引用回复时 content 里会包含被引用消息的 <@botid>，导致 @tag 出现两次
+            # 直接@只有一次，引用@有两次或以上
+            at_count = content.count(bot_tag) if bot_tag else len(re.findall(r"<@[^>]+>", content))
+            is_reference_reply = at_count > 1
+            logger.info(
+                f"[群消息] group_openid={message.group_openid} "
+                f"content={content!r} at_count={at_count} is_at={is_at_bot} is_ref={is_reference_reply}"
+            )
             if is_at_bot and not is_reference_reply:
                 clean = re.sub(r"<@[^>]+>", "", content).strip()
                 await self._handle_at_command(message, clean)
@@ -278,11 +288,16 @@ class BotHandlers(botpy.Client):
         products = self._state_to_products()
         term = _extract_search_term(clean)
         results = _search_by_title(products, term) if term else []
+        tokens = None
         if not results:
             tokens = _extract_search_tokens(clean)
             results = _search_by_tokens(products, tokens)
 
-        display = term or clean
+        # 显示词：token 兜底成功时用 token 拼接，避免显示"帮我找plus号"这类原始脏词
+        if tokens and results:
+            display = " ".join(tokens)
+        else:
+            display = term or clean
         if results:
             await self._send_search_results(message, display, results)
         else:
