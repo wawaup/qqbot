@@ -1,9 +1,27 @@
+# 环境配置（含密钥，不上传）
 .env
 
-botpy.log
+# 运行时状态快照
+state.json
 
+# 日志（含轮转文件）
+botpy.log
+botpy.log.*
+*.log
+
+# Python 缓存
 __pycache__/
 *.pyc
+*.pyo
 
+# 虚拟环境
 .venv/
+
+# 爬虫调试输出
+debug_shop.html
+
+# macOS 元数据
+.DS_Store
+
+# 其他本地目录
 somedocs/
