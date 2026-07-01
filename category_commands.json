@@ -6,8 +6,8 @@
   "接码":      ["codex/paypal接码,手机验证码"],
   "claude":    ["Claude"],
   "gemini":    ["Gemini充值订阅"],
-  "grok":      ["GROK", "Grok和其他"],
-  "其他":      ["Grok和其他"],
+  "grok":      ["GROK和其他"],
+  "其他":      ["GROK和其他"],
   "苹果id":    ["苹果id/谷歌/微软/iCloud邮箱"],
   "邮箱服务":  ["苹果id/谷歌/微软/iCloud邮箱"],
   "邮箱":      ["苹果id/谷歌/微软/iCloud邮箱"]
