@@ -23,6 +23,9 @@ NOTIFY_EXCLUDE_CATEGORIES: set[str] = {
     "苹果id/谷歌/微软/iCloud邮箱",
 }
 
+# 同一商品两次通知之间的最小间隔（秒），防止反复补货刷屏，默认 30 分钟
+NOTIFY_COOLDOWN: int = int(os.getenv("NOTIFY_COOLDOWN", "1800"))
+
 # GPT 分类：低于此价格的商品补货立即通知，其余走 30 分钟批量通知
 GPT_INSTANT_PRICE_THRESHOLD: float = float(os.getenv("GPT_INSTANT_PRICE_THRESHOLD", "20"))
 # GPT 分类批量通知间隔（秒），默认 30 分钟

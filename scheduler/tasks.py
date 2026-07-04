@@ -11,6 +11,7 @@ from config import (
     GPT_BATCH_INTERVAL,
     GPT_CATEGORIES,
     GPT_INSTANT_PRICE_THRESHOLD,
+    NOTIFY_COOLDOWN,
     NOTIFY_EXCLUDE_CATEGORIES,
     SCAN_INTERVAL,
     SHOP_URL,
@@ -34,6 +35,22 @@ _bot_client = None
 # GPT 分类价格 >= 阈值的补货/新品缓冲区，每 GPT_BATCH_INTERVAL 秒统一发送
 _gpt_pending_restocked: dict[str, object] = {}
 _gpt_pending_new: dict[str, object] = {}
+
+# 通知冷却：记录每个商品 ID 上次进入通知队列的时间
+_notify_cooldown: dict[str, datetime] = {}
+
+
+def _is_on_cooldown(product_id: str) -> bool:
+    last = _notify_cooldown.get(product_id)
+    if last is None:
+        return False
+    return (datetime.now(CST) - last).total_seconds() < NOTIFY_COOLDOWN
+
+
+def _mark_notified(products: list) -> None:
+    now = datetime.now(CST)
+    for p in products:
+        _notify_cooldown[p.id] = now
 
 
 def set_bot_client(client) -> None:
@@ -74,6 +91,16 @@ async def scan_and_notify(first_run: bool = False) -> None:
     state.save_state(current_products)
 
     in_stock_count = sum(1 for p in current_products.values() if p.in_stock)
+
+    # 冷却过滤：同一商品 NOTIFY_COOLDOWN 秒内只进入通知队列一次
+    cooled_r = [p for p in restocked if _is_on_cooldown(p.id)]
+    cooled_n = [p for p in new_products if _is_on_cooldown(p.id)]
+    restocked = [p for p in restocked if not _is_on_cooldown(p.id)]
+    new_products = [p for p in new_products if not _is_on_cooldown(p.id)]
+    if cooled_r or cooled_n:
+        logger.info(f"冷却过滤：跳过 {len(cooled_r)} 个补货、{len(cooled_n)} 个新品（{NOTIFY_COOLDOWN}s 内已通知过）")
+    _mark_notified(restocked + new_products)
+
     logger.info(
         f"扫描完成：共 {len(current_products)} 个商品，"
         f"有货 {in_stock_count} 个，补货 {len(restocked)} 个，新品 {len(new_products)} 个"
