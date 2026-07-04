@@ -51,12 +51,9 @@ async def scan_and_notify(first_run: bool = False) -> None:
     """扫描商店库存，有补货时发群消息。
 
     first_run=True 时只建立快照，不发通知（避免把全量商品误报为补货）。
-    静默时段（00:00-09:00）跳过扫描，9 点后首次扫描可捕获整夜的补货。
+    静默时段（00:00-09:00）仍然扫描并更新快照，只跳过发送通知，
+    确保用户 @查询 时拿到的是最新库存数据。
     """
-    if not first_run and _in_quiet_hours():
-        logger.debug("静默时段，跳过扫描")
-        return
-
     logger.info("开始扫描商店库存...")
     try:
         current_products = await scraper.scan_all(SHOP_URL)
@@ -81,6 +78,11 @@ async def scan_and_notify(first_run: bool = False) -> None:
         f"扫描完成：共 {len(current_products)} 个商品，"
         f"有货 {in_stock_count} 个，补货 {len(restocked)} 个，新品 {len(new_products)} 个"
     )
+
+    # 静默时段只更新快照，不发通知
+    if _in_quiet_hours():
+        logger.debug("静默时段，跳过通知")
+        return
 
     # GPT 分类：低价立即通知，高价缓冲到批量任务
     def _is_gpt_instant(p) -> bool:
