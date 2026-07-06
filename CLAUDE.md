@@ -77,12 +77,7 @@ qqbot/
 - `category_commands.json`、`NOTIFY_EXCLUDE_CATEGORIES` 都按 `category_id` 匹配，JSON 里保留的 `name` 仅作人读注释
 - 若店铺后台新增/删除分类，需要重新跑一次爬虫查出新 `id` 并更新配置
 
-### 3. 库存数 / 折扣价展示
-
-- `shop/scraper.py` 从接口的 `extend.stock_count`（剩余库存）、`market_price`（划线原价，`0` 表示无折扣）、`description`（HTML 商品说明，用 `BeautifulSoup(...).get_text("\n", strip=True)` 清洗成纯文本）、`image`（商品图片直链）里采集这 4 个字段，存到 `Product` 上并持久化进 `state.json`
-- `bot/formatter.py` 的 `_stock_label()` 在有库存数时展示「剩N件」；`_price_label()` 在 `market_price > price > 0` 时用删除线展示原价（`~~原价r~~ 现价r`），否则展示原有的单一价格；这两者用在分类列表、搜索结果、三种通知（新品/上架/补货）和每日汇总里
-
-### 4. @机器人 指令
+### 3. @机器人 指令
 
 `on_group_message_create` 检测消息里是否含 `<@BOT_OPENID>`，是则走指令流程。
 
@@ -105,9 +100,9 @@ qqbot/
 - 触发词用**锚定正则**匹配（`^(?:商品详情|详细信息|详情)\s*(.*)$`），只在消息**开头**是这些词时才生效，避免跟 `keywords.json` 里"订单详情"这类 FAQ 关键词的"详情"子串冲突（关键词自动回复优先级更高，"订单详情"会先被 Step 3 命中，走不到这里）
 - 参数是纯数字 → 按序号从`该用户在该群最近一次查看的列表`里取商品；参数是文字或为空 → 走标题搜索取第一个结果
 - **列表缓存**：`bot/handlers.py` 的 `_last_shown`（key 为 `(group_openid, member_openid)`）只在**分类指令**和**关键词搜索**返回结果后写入，全量菜单（`format_product_menu`）不写入——因为菜单按分类分组、序号在每个分类内重新从 1 开始，全局序号会有歧义
-- 返回内容：标题、价格（含折扣）、库存、商品说明（截断约 400 字）、链接；商品带图片时额外发一张图
+- 返回内容：标题、价格、商品说明（截断约 400 字）、链接
 
-### 5. 关键词自动回复
+### 4. 关键词自动回复
 
 配置在 `keywords.json`，@bot 或不 @bot 发普通群消息命中关键词都会触发：
 
@@ -116,7 +111,7 @@ qqbot/
 - `replies`：数组，随机选一条（用于彩虹屁等）
 - `image`：附带图片的 key（映射到 `config.py` 的 `PICS_URLS`）
 
-### 6. 消息发送
+### 5. 消息发送
 
 所有回复均为 Markdown 格式（`msg_type=2`）。图片先发文字再发媒体（`msg_type=7`）。
 

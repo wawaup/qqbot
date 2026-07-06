@@ -347,10 +347,7 @@ class BotHandlers(botpy.Client):
                 category_id=d.get("category_id"),
                 in_stock=d["in_stock"],
                 price=str(d.get("price", "")),
-                market_price=d.get("market_price", ""),
-                stock_count=d.get("stock_count", 0),
                 description=d.get("description", ""),
-                image=d.get("image", ""),
             )
             for pid, d in load_state().items()
             if d.get("listed", True)
@@ -396,11 +393,6 @@ class BotHandlers(botpy.Client):
 
     async def _send_product_detail(self, message: GroupMessage, product) -> None:
         await _reply_markdown(message, format_product_detail(product))
-        if product.image:
-            try:
-                await _send_image_only(message, product.image)
-            except Exception as e:
-                logger.warning(f"商品详情图片发送失败: {e}")
 
     async def _send_keyword_reply(self, message: GroupMessage, rule: dict):
         # 支持 replies 数组（随机选一条）或单条 reply

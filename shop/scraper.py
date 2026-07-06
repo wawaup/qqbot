@@ -71,10 +71,7 @@ async def scan_all(shop_url: str) -> dict[str, Product]:
             category_id=category.get("id"),
             in_stock=stock_count > 0,
             price=str(item.get("price", "")),
-            market_price=str(item.get("market_price") or ""),
-            stock_count=stock_count,
             description=_clean_description(item.get("description", "")),
-            image=item.get("image", ""),
         )
 
     return products

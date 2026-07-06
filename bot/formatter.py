@@ -6,26 +6,15 @@ if TYPE_CHECKING:
 
 
 def _price_label(p: "Product") -> str:
-    try:
-        price = float(p.price) if p.price else 0
-        market_price = float(p.market_price) if p.market_price else 0
-    except ValueError:
-        price = market_price = 0
-    if market_price > price > 0:
-        return f"~~{p.market_price}r~~ {p.price}r · "
     return f"{p.price}r · " if p.price else ""
 
 
-def _stock_label(p: "Product") -> str:
-    return f"剩{p.stock_count}件 · " if p.stock_count else ""
-
-
 def _item_line(i: int, p: "Product") -> str:
-    return f"{i}. **{_price_label(p)}{_stock_label(p)}{p.title}**\n   {p.url}"
+    return f"{i}. **{_price_label(p)}{p.title}**\n   {p.url}"
 
 
 def _notice_line(p: "Product") -> str:
-    return f"\n**{_price_label(p)}{_stock_label(p)}{p.title}**\n   {p.url}"
+    return f"\n**{_price_label(p)}{p.title}**\n   {p.url}"
 
 
 def format_product_menu(products: dict[str, "Product"]) -> str:
@@ -73,7 +62,7 @@ def format_search_results(query: str, products: list["Product"]) -> str:
 
 
 def format_product_detail(p: "Product") -> str:
-    lines = [f"# {p.title}", f"\n{_price_label(p)}{_stock_label(p)}".rstrip(" ·")]
+    lines = [f"# {p.title}", f"\n{_price_label(p)}".rstrip(" ·")]
     if p.description:
         desc = p.description
         if len(desc) > 400:
