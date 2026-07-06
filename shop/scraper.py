@@ -52,13 +52,15 @@ async def scan_all(shop_url: str) -> dict[str, Product]:
     for item in data["data"]["list"]:
         goods_key = item["goods_key"]
         stock_count = item.get("extend", {}).get("stock_count", 0)
-        category_name = item.get("category", {}).get("name", "其他")
+        category = item.get("category", {})
+        category_name = category.get("name", "其他")
 
         products[goods_key] = Product(
             id=goods_key,
             title=item["name"],
             url=item["link"],
             category=category_name,
+            category_id=category.get("id"),
             in_stock=stock_count > 0,
             price=str(item.get("price", "")),
         )
@@ -76,12 +78,13 @@ if __name__ == "__main__":
         if "--debug" in sys.argv:
             for p in products.values():
                 status = "✅有货" if p.in_stock else "❌缺货"
-                print(f"[{p.category}] {status}  {p.title}")
+                print(f"[{p.category}({p.category_id})] {status}  {p.title}")
                 print(f"     {p.url}")
         else:
             print(json.dumps(
                 {pid: {"title": p.title, "url": p.url,
-                       "category": p.category, "in_stock": p.in_stock}
+                       "category": p.category, "category_id": p.category_id,
+                       "in_stock": p.in_stock}
                  for pid, p in products.items()},
                 ensure_ascii=False, indent=2,
             ))

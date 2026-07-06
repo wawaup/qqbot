@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-QQ 群机器人，监控 `pay.ldxp.cn/shop/manboup` 的商品库存变化，自动发补货/新品通知，支持 @指令查询商品、关键词自动回复、彩虹屁等功能。
+QQ 群机器人，监控 `pay.ldxp.cn/shop/manboup` 的商品库存变化，自动发新品/上架/补货通知，支持 @指令查询商品、关键词自动回复、彩虹屁等功能。
 
 ## 常用命令
 
@@ -36,11 +36,11 @@ qqbot/
 │   ├── handlers.py          # 消息事件处理，继承 botpy.Client
 │   └── formatter.py         # 消息文本格式化
 ├── scheduler/
-│   └── tasks.py             # APScheduler 定时扫描 + GPT 批量通知
+│   └── tasks.py             # APScheduler 定时扫描 + 通知调度
 ├── storage/
-│   └── state.py             # state.json 快照管理，diff_states() 检测补货
+│   └── state.py             # state.json 快照管理（合并式），diff_states() 检测新品/上架/补货
 ├── keywords.json            # 关键词→回复 配置（支持 reply 单条或 replies 数组随机）
-├── category_commands.json   # 分类指令→分类名 映射
+├── category_commands.json   # 分类指令→分类 id 映射
 └── pics/                    # 回复附带的图片
 ```
 
@@ -55,28 +55,28 @@ qqbot/
 | `SHOP_URL` | 店铺地址 | `https://pay.ldxp.cn/shop/manboup` |
 | `SCAN_INTERVAL` | 爬虫扫描间隔（秒） | `60` |
 | `SANDBOX` | 沙盒模式，不真实发消息 | `false` |
-| `GPT_INSTANT_PRICE_THRESHOLD` | GPT 分类立即通知的价格上限（元） | `20` |
-| `GPT_BATCH_INTERVAL` | GPT 分类批量通知间隔（秒） | `1800` |
+| `NOTIFY_COOLDOWN` | 同一商品通知冷却（秒），覆盖新品/上架/补货三种事件 | `900`（15 分钟） |
 
 ## 功能说明
 
-### 1. 补货 / 新品通知
+### 1. 新品 / 上架 / 补货通知
 
-- 每 `SCAN_INTERVAL` 秒爬一次店铺，用 `diff_states()` 对比上次快照
-- **补货**：之前存在但缺货，现在有货
-- **新品**：快照中不存在，现在有货
-- 通知屏蔽：`NOTIFY_EXCLUDE_CATEGORIES`（`config.py` 硬编码）中的分类不通知
-- **静默时段**：00:00–09:00 继续扫描并更新快照，但不发通知；确保用户 @查询 始终拿到最新库存
+- 每 `SCAN_INTERVAL` 秒爬一次店铺，用 `diff_states()` 对比上次快照，三种事件互斥、按优先级判定：
+  1. **新品**：`goods_key` 之前从未出现过，现在在架且有货
+  2. **上架**：`goods_key` 之前出现过但已下架（`listed=False`），现在重新在架且有货
+  3. **补货**：`goods_key` 一直在架，只是缺货变有货
+- 商城接口不会返回下架商品（下架即从列表消失），所以 `state.json` 采用**合并式**保存：本次扫描消失的商品不删除，只把 `listed` 置为 `False`，用于识别"上架"事件
+- 通知冷却：`NOTIFY_COOLDOWN`（默认 15 分钟）按 `goods_key` 生效，同一商品无论触发新品/上架/补货哪一种，冷却期内只通知一次，防止反复上下架刷屏
+- 通知屏蔽：`NOTIFY_EXCLUDE_CATEGORIES`（`config.py` 硬编码，按分类 `id` 匹配）中的分类不通知
+- **静默时段**：00:00–09:00 继续扫描、更新快照、正常做冷却标记，只跳过发送通知；确保用户 @查询 始终拿到最新库存
 
-#### GPT 分类分级通知
+### 2. 分类以 id 而非名称匹配
 
-GPT 分类（`plus 成品已接码直接登/包括 gpt free`、`没接码,还有Team/长质保商品`）按价格分两条通道：
+- 商城接口每个商品自带稳定的数字 `category.id`，改分类名不影响它
+- `category_commands.json`、`NOTIFY_EXCLUDE_CATEGORIES` 都按 `category_id` 匹配，JSON 里保留的 `name` 仅作人读注释
+- 若店铺后台新增/删除分类，需要重新跑一次爬虫查出新 `id` 并更新配置
 
-- 价格 < `GPT_INSTANT_PRICE_THRESHOLD`（默认 20 元）→ 立即通知
-- 价格 ≥ 阈值 → 缓冲，每 `GPT_BATCH_INTERVAL`（默认 30 分钟）批量发一次
-- 批量发送前用最新快照二次验证：下架或已售罄的过滤掉，不通知
-
-### 2. @机器人 指令
+### 3. @机器人 指令
 
 `on_group_message_create` 检测消息里是否含 `<@BOT_OPENID>`，是则走指令流程。
 
@@ -87,32 +87,32 @@ GPT 分类（`plus 成品已接码直接登/包括 gpt free`、`没接码,还有
 1. **无内容 / 使用指南触发词**（`使用指南`、`指令`、`help`、`帮助`、`怎么用`）→ 发使用指南
 2. **菜单词**（`清单`、`菜单`、`menu`、`商品清单`、`有什么`、`卖什么`）→ 全量分类菜单
 3. **分类指令**（`category_commands.json` 中的 key，如 `gpt`、`claude`、`接码`）→ 对应分类有货商品
-4. **关键词搜索** → 两步匹配：
+4. **关键词搜索**（商品标题搜索，与下节的"关键词自动回复"是两回事）→ 两步匹配：
    - Step 1：regex 剥离首尾询问词（`有没有`、`有货吗`、`能用吗` 等）后整体子串匹配
    - Step 2：无结果则 jieba 分词过滤停用词，AND 优先 → OR 兜底
    - 有结果 → 返回搜索结果；无结果 → 返回「暂时没找到X相关的有货商品～」（不显示使用指南）
 
-### 3. 关键词自动回复
+### 4. 关键词自动回复
 
-无 @bot 的普通群消息触发，配置在 `keywords.json`：
+配置在 `keywords.json`，@bot 或不 @bot 发普通群消息命中关键词都会触发：
 
 - `keywords` 数组：任一关键词命中即触发
 - `reply`：单条固定回复
 - `replies`：数组，随机选一条（用于彩虹屁等）
 - `image`：附带图片的 key（映射到 `config.py` 的 `PICS_URLS`）
 
-### 4. 消息发送
+### 5. 消息发送
 
 所有回复均为 Markdown 格式（`msg_type=2`）。图片先发文字再发媒体（`msg_type=7`）。
 
-主动推送（补货/新品）通过 `_broadcast()` 遍历 `GROUP_OPENIDS` 发送，不依赖 `msg_id`。
+主动推送（新品/上架/补货）通过 `_broadcast()` 遍历 `GROUP_OPENIDS` 发送，不依赖 `msg_id`。
 
 每条触发消息最多可发 5 条回复（`msg_seq` 计数器，按 `msg_id` 追踪）。
 
 ## 架构关键点
 
 - **爬虫**：页面有 WAF，使用 Playwright 无头 Chromium 渲染。`SELECTORS` 字典在 `shop/scraper.py` 顶部，页面改版只改这里。`--debug` 保存 `debug_shop.html`。
-- **库存快照**：`state.json` 保存上次扫描结果，`diff_states()` 做增量对比。
+- **库存快照**：`state.json` 保存上次扫描结果，合并式更新（下架商品保留记录、仅标记 `listed=False`，不删除），`diff_states()` 基于此做新品/上架/补货三态判定。
 - **Bot 依赖注入**：`scheduler/tasks.py` 的 `_bot_client` 由 `main.py` 通过 `set_bot_client()` 注入，避免循环导入。
 - **关键词缓存**：`keywords.json` 和 `category_commands.json` 首次访问后缓存在内存，重启生效。
 - **jieba 预热**：`handlers.py` import 时调用 `jieba.initialize()`，避免首次查询阻塞事件循环。

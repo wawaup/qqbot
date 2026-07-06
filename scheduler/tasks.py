@@ -1,16 +1,12 @@
 """
-定时扫描任务：每 SCAN_INTERVAL 秒扫描店铺，检测补货并通知 QQ 群。
+定时扫描任务：每 SCAN_INTERVAL 秒扫描店铺，检测上新/上架/补货并通知 QQ 群。
 """
 import logging
-import re
 from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import (
-    GPT_BATCH_INTERVAL,
-    GPT_CATEGORIES,
-    GPT_INSTANT_PRICE_THRESHOLD,
     NOTIFY_COOLDOWN,
     NOTIFY_EXCLUDE_CATEGORIES,
     SCAN_INTERVAL,
@@ -32,11 +28,8 @@ logger = logging.getLogger(__name__)
 
 _bot_client = None
 
-# GPT 分类价格 >= 阈值的补货/新品缓冲区，每 GPT_BATCH_INTERVAL 秒统一发送
-_gpt_pending_restocked: dict[str, object] = {}
-_gpt_pending_new: dict[str, object] = {}
-
 # 通知冷却：记录每个商品 ID 上次进入通知队列的时间
+# 同一 goods_key 无论触发的是新品/上架/补货中的哪一种，都共用这份冷却
 _notify_cooldown: dict[str, datetime] = {}
 
 
@@ -53,22 +46,21 @@ def _mark_notified(products: list) -> None:
         _notify_cooldown[p.id] = now
 
 
+def _filter_cooldown(products: list) -> list:
+    """过滤掉仍在冷却期内的商品，返回可以通知的商品列表。"""
+    return [p for p in products if not _is_on_cooldown(p.id)]
+
+
 def set_bot_client(client) -> None:
     global _bot_client
     _bot_client = client
 
 
-def _parse_price(price_str: str) -> float:
-    """从价格字符串提取数值，解析失败返回 inf（不触发即时通知）。"""
-    m = re.search(r"[\d.]+", price_str or "")
-    return float(m.group()) if m else float("inf")
-
-
 async def scan_and_notify(first_run: bool = False) -> None:
-    """扫描商店库存，有补货时发群消息。
+    """扫描商店库存，有上新/上架/补货时发群消息。
 
     first_run=True 时只建立快照，不发通知（避免把全量商品误报为补货）。
-    静默时段（00:00-09:00）仍然扫描并更新快照，只跳过发送通知，
+    静默时段（00:00-09:00）仍然扫描并更新快照、正常做冷却标记，只跳过发送通知，
     确保用户 @查询 时拿到的是最新库存数据。
     """
     logger.info("开始扫描商店库存...")
@@ -85,88 +77,46 @@ async def scan_and_notify(first_run: bool = False) -> None:
         state.save_state(current_products)
         return
 
-    restocked, new_products = state.diff_states(old_state, current_products)
-    restocked = [p for p in restocked if p.category not in NOTIFY_EXCLUDE_CATEGORIES]
-    new_products = [p for p in new_products if p.category not in NOTIFY_EXCLUDE_CATEGORIES]
+    new_products, relisted_products, restocked_products = state.diff_states(old_state, current_products)
+
+    def _exclude(products: list) -> list:
+        return [p for p in products if p.category_id not in NOTIFY_EXCLUDE_CATEGORIES]
+
+    new_products = _exclude(new_products)
+    relisted_products = _exclude(relisted_products)
+    restocked_products = _exclude(restocked_products)
+
     state.save_state(current_products)
 
     in_stock_count = sum(1 for p in current_products.values() if p.in_stock)
 
     # 冷却过滤：同一商品 NOTIFY_COOLDOWN 秒内只进入通知队列一次
-    cooled_r = [p for p in restocked if _is_on_cooldown(p.id)]
-    cooled_n = [p for p in new_products if _is_on_cooldown(p.id)]
-    restocked = [p for p in restocked if not _is_on_cooldown(p.id)]
-    new_products = [p for p in new_products if not _is_on_cooldown(p.id)]
-    if cooled_r or cooled_n:
-        logger.info(f"冷却过滤：跳过 {len(cooled_r)} 个补货、{len(cooled_n)} 个新品（{NOTIFY_COOLDOWN}s 内已通知过）")
-    _mark_notified(restocked + new_products)
+    before_counts = (len(new_products), len(relisted_products), len(restocked_products))
+    new_products = _filter_cooldown(new_products)
+    relisted_products = _filter_cooldown(relisted_products)
+    restocked_products = _filter_cooldown(restocked_products)
+    cooled = sum(before_counts) - len(new_products) - len(relisted_products) - len(restocked_products)
+    if cooled:
+        logger.info(f"冷却过滤：跳过 {cooled} 个商品（{NOTIFY_COOLDOWN}s 内已通知过）")
+    _mark_notified(new_products + relisted_products + restocked_products)
 
     logger.info(
-        f"扫描完成：共 {len(current_products)} 个商品，"
-        f"有货 {in_stock_count} 个，补货 {len(restocked)} 个，新品 {len(new_products)} 个"
+        f"扫描完成：共 {len(current_products)} 个商品，有货 {in_stock_count} 个，"
+        f"新品 {len(new_products)} 个，上架 {len(relisted_products)} 个，补货 {len(restocked_products)} 个"
     )
 
-    # 静默时段只更新快照，不发通知
+    # 静默时段只更新快照和冷却状态，不发通知
     if _in_quiet_hours():
         logger.debug("静默时段，跳过通知")
         return
 
-    # GPT 分类：低价立即通知，高价缓冲到批量任务
-    def _is_gpt_instant(p) -> bool:
-        return p.category in GPT_CATEGORIES and _parse_price(p.price) < GPT_INSTANT_PRICE_THRESHOLD
-
-    def _is_gpt_batch(p) -> bool:
-        return p.category in GPT_CATEGORIES and _parse_price(p.price) >= GPT_INSTANT_PRICE_THRESHOLD
-
-    instant_restocked = [p for p in restocked if p.category not in GPT_CATEGORIES or _is_gpt_instant(p)]
-    instant_new = [p for p in new_products if p.category not in GPT_CATEGORIES or _is_gpt_instant(p)]
-
-    for p in restocked:
-        if _is_gpt_batch(p):
-            _gpt_pending_restocked[p.id] = p
-    for p in new_products:
-        if _is_gpt_batch(p):
-            _gpt_pending_new[p.id] = p
-
     if _bot_client is not None:
-        if instant_restocked:
-            await _bot_client.send_restock_notice(instant_restocked)
-        if instant_new:
-            await _bot_client.send_new_product_notice(instant_new)
-
-
-async def flush_gpt_pending() -> None:
-    """每 GPT_BATCH_INTERVAL 秒发送一次 GPT 分类的缓冲补货/新品通知。"""
-    if _in_quiet_hours():
-        return
-
-    restocked = list(_gpt_pending_restocked.values())
-    new_products = list(_gpt_pending_new.values())
-    _gpt_pending_restocked.clear()
-    _gpt_pending_new.clear()
-
-    if not restocked and not new_products:
-        return
-
-    # 用最新快照二次验证：下架或已售罄的不通知
-    latest = state.load_state()
-    def _still_in_stock(p) -> bool:
-        entry = latest.get(p.id)
-        return entry is not None and entry.get("in_stock", False)
-
-    before_r, before_n = len(restocked), len(new_products)
-    restocked = [p for p in restocked if _still_in_stock(p)]
-    new_products = [p for p in new_products if _still_in_stock(p)]
-    filtered = (before_r - len(restocked)) + (before_n - len(new_products))
-    if filtered:
-        logger.info(f"GPT 批量通知：过滤掉 {filtered} 个已下架/售罄商品")
-
-    logger.info(f"GPT 批量通知：补货 {len(restocked)} 个，新品 {len(new_products)} 个")
-    if _bot_client is not None:
-        if restocked:
-            await _bot_client.send_restock_notice(restocked)
         if new_products:
             await _bot_client.send_new_product_notice(new_products)
+        if relisted_products:
+            await _bot_client.send_relisted_notice(relisted_products)
+        if restocked_products:
+            await _bot_client.send_restock_notice(restocked_products)
 
 
 def create_scheduler() -> AsyncIOScheduler:
@@ -176,14 +126,6 @@ def create_scheduler() -> AsyncIOScheduler:
         trigger="interval",
         seconds=SCAN_INTERVAL,
         id="shop_scan",
-        replace_existing=True,
-        max_instances=1,
-    )
-    scheduler.add_job(
-        flush_gpt_pending,
-        trigger="interval",
-        seconds=GPT_BATCH_INTERVAL,
-        id="gpt_batch_notify",
         replace_existing=True,
         max_instances=1,
     )

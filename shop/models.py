@@ -9,6 +9,7 @@ class Product:
     category: str
     in_stock: bool
     price: str = ""
+    category_id: int | None = None
 
 
 @dataclass

@@ -36,14 +36,15 @@ def format_product_menu(products: dict[str, "Product"]) -> str:
     return "\n\n".join(parts)
 
 
-def format_category_products(
+def filter_category_products(
     products: dict[str, "Product"],
-    categories: list[str],
-    label: str,
-) -> str:
-    cat_set = set(categories)
-    items = [p for p in products.values() if p.in_stock and p.category in cat_set]
+    category_ids: list[int],
+) -> list:
+    id_set = set(category_ids)
+    return [p for p in products.values() if p.in_stock and p.category_id in id_set]
 
+
+def format_category_products(items: list["Product"], label: str) -> str:
     if not items:
         return f"## 【{label}】\n\n暂时没有有货商品，补货时会通知～"
 
@@ -69,6 +70,13 @@ def format_restock_notice(products: list["Product"]) -> str:
 
 def format_new_product_notice(products: list["Product"]) -> str:
     lines = ["# 🆕 新品上架"]
+    for p in products:
+        lines.append(_notice_line(p))
+    return "\n".join(lines)
+
+
+def format_relisted_notice(products: list["Product"]) -> str:
+    lines = ["# 🔄 商品重新上架"]
     for p in products:
         lines.append(_notice_line(p))
     return "\n".join(lines)

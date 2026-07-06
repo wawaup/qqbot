@@ -16,7 +16,12 @@ from botpy.types import message as msg_types
 
 jieba.initialize()  # 启动时预加载词典，避免首次查询阻塞事件循环
 
-from bot.formatter import format_category_products, format_product_menu, format_search_results
+from bot.formatter import (
+    filter_category_products,
+    format_category_products,
+    format_product_menu,
+    format_search_results,
+)
 from config import BOT_OPENID, CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
 from storage.state import load_state
 
@@ -81,7 +86,7 @@ def _load_keywords() -> list[dict]:
     return _keywords_cache
 
 
-def _load_category_commands() -> dict[str, list[str]]:
+def _load_category_commands() -> dict[str, list[dict]]:
     global _category_commands_cache
     if _category_commands_cache is None:
         path = Path(CATEGORY_COMMANDS_FILE)
@@ -97,11 +102,11 @@ def _match_keyword(text: str) -> dict | None:
     return None
 
 
-def _match_category_command(text: str) -> tuple[str, list[str]] | None:
+def _match_category_command(text: str) -> tuple[str, list[int]] | None:
     text_lower = text.lower()
     for cmd, categories in _load_category_commands().items():
         if cmd.lower() in text_lower:
-            return cmd, categories
+            return cmd, [c["id"] for c in categories]
     return None
 
 
@@ -311,20 +316,20 @@ class BotHandlers(botpy.Client):
                 title=d["title"],
                 url=d["url"],
                 category=d["category"],
+                category_id=d.get("category_id"),
                 in_stock=d["in_stock"],
                 price=str(d.get("price", "")),
             )
             for pid, d in load_state().items()
+            if d.get("listed", True)
         }
 
     async def _send_menu(self, message: GroupMessage):
         await _reply_markdown(message, format_product_menu(self._state_to_products()))
 
-    async def _send_category(self, message: GroupMessage, cmd: str, categories: list[str]):
-        await _reply_markdown(
-            message,
-            format_category_products(self._state_to_products(), categories, cmd),
-        )
+    async def _send_category(self, message: GroupMessage, cmd: str, category_ids: list[int]):
+        items = filter_category_products(self._state_to_products(), category_ids)
+        await _reply_markdown(message, format_category_products(items, cmd))
 
     async def _send_search_results(self, message: GroupMessage, term: str, results: list):
         await _reply_markdown(message, format_search_results(term, results))
@@ -362,3 +367,7 @@ class BotHandlers(botpy.Client):
     async def send_new_product_notice(self, products: list) -> None:
         from bot.formatter import format_new_product_notice
         await self._broadcast(format_new_product_notice(products), "新品通知", len(products))
+
+    async def send_relisted_notice(self, products: list) -> None:
+        from bot.formatter import format_relisted_notice
+        await self._broadcast(format_relisted_notice(products), "上架通知", len(products))

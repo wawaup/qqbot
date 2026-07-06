@@ -18,23 +18,15 @@ STATE_FILE = "state.json"
 KEYWORDS_FILE = "keywords.json"
 CATEGORY_COMMANDS_FILE = "category_commands.json"
 
-# 补货通知屏蔽的分类（精确匹配分类名）
-NOTIFY_EXCLUDE_CATEGORIES: set[str] = {
-    "苹果id/谷歌/微软/iCloud邮箱",
+# 补货/上新/上架通知屏蔽的分类（按分类 id 匹配，不受改名影响）
+# 73959 = 苹果id/谷歌/微软/iCloud邮箱
+NOTIFY_EXCLUDE_CATEGORIES: set[int] = {
+    73959,
 }
 
-# 同一商品两次通知之间的最小间隔（秒），防止反复补货刷屏，默认 30 分钟
-NOTIFY_COOLDOWN: int = int(os.getenv("NOTIFY_COOLDOWN", "1800"))
-
-# GPT 分类：低于此价格的商品补货立即通知，其余走 30 分钟批量通知
-GPT_INSTANT_PRICE_THRESHOLD: float = float(os.getenv("GPT_INSTANT_PRICE_THRESHOLD", "20"))
-# GPT 分类批量通知间隔（秒），默认 30 分钟
-GPT_BATCH_INTERVAL: int = int(os.getenv("GPT_BATCH_INTERVAL", "1800"))
-# GPT 分类对应的实际店铺分类名（与爬虫解析的 product.category 精确匹配）
-GPT_CATEGORIES: set[str] = {
-    "plus 成品已接码直接登/包括 gpt free",
-    "没接码,还有Team/长质保商品",
-}
+# 同一商品两次通知之间的最小间隔（秒），防止反复上架/补货刷屏，默认 15 分钟
+# 覆盖新品/上架/补货三种事件，同一 goods_key 共用一份冷却
+NOTIFY_COOLDOWN: int = int(os.getenv("NOTIFY_COOLDOWN", "900"))
 
 # keywords.json 的 image 字段 → 图片直链映射
 PICS_URLS: dict[str, str] = {
