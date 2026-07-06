@@ -12,6 +12,7 @@ import sys
 from urllib.parse import urlparse
 
 import httpx
+from bs4 import BeautifulSoup
 
 from shop.models import Product
 
@@ -27,6 +28,13 @@ HEADERS = {
 def _extract_token(shop_url: str) -> str:
     """从店铺 URL 提取 token，如 https://pay.ldxp.cn/shop/manboup → manboup"""
     return urlparse(shop_url).path.rstrip("/").split("/")[-1]
+
+
+def _clean_description(html: str) -> str:
+    """把商品详情的 HTML 转成纯文本，供详情指令展示。"""
+    if not html:
+        return ""
+    return BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
 
 async def scan_all(shop_url: str) -> dict[str, Product]:
@@ -63,6 +71,10 @@ async def scan_all(shop_url: str) -> dict[str, Product]:
             category_id=category.get("id"),
             in_stock=stock_count > 0,
             price=str(item.get("price", "")),
+            market_price=str(item.get("market_price") or ""),
+            stock_count=stock_count,
+            description=_clean_description(item.get("description", "")),
+            image=item.get("image", ""),
         )
 
     return products

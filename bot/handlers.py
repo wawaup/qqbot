@@ -19,6 +19,8 @@ jieba.initialize()  # 启动时预加载词典，避免首次查询阻塞事件�
 from bot.formatter import (
     filter_category_products,
     format_category_products,
+    format_daily_digest,
+    format_product_detail,
     format_product_menu,
     format_search_results,
 )
@@ -38,6 +40,9 @@ _QUERY_STRIP = re.compile(
     r"|^\s*(有没有|还有|求推荐|想买个|买个|想买)\s*"
 )
 
+# 详情指令：详情/商品详情/详细信息 + 序号 或 商品名，锚定开头避免跟"订单详情"等 FAQ 关键词冲突
+_DETAIL_RE = re.compile(r"^(?:商品详情|详细信息|详情)\s*(.*)$")
+
 # jieba 分词后过滤掉的虚词/查询词
 _STOP_TOKENS = frozenset({
     "有没有", "有货吗", "有吗", "有么", "在吗", "卖吗", "能买吗",
@@ -52,26 +57,28 @@ _STOP_TOKENS = frozenset({
 })
 
 HELP_TEXT = (
-    "# 曼波导购bot 使用指南\n\n"
-    "成品号新手教程：[点击查看](https://www.xtpu.asia/#/)\n\n"
-    "## 分类查询\n"
-    "@我 发分类指令查有货商品：\n"
-    "- 推荐 / gpt正价 / 正价冲\n"
-    "- gpt · 接码 · claude · gemini\n"
-    "- grok / 其他 · 苹果id / 邮箱服务\n"
-    "- 清单 / 菜单 / menu → 查看全部分类\n\n"
-    "## 商品搜索\n"
-    "@我 直接说想找什么，口语化也没问题：\n"
-    "- @bot plus / @bot 有没有codex / @bot 想买个网页号\n\n"
-    "## 自动回复\n"
-    "直接在群里发关键词可自动回复：\n"
-    "- 店铺链接 / 在哪买\n"
-    "- 质保首登 / 活多久 / 会封吗\n"
-    "- 哪里查订单 / 订单卡密\n"
-    "- 售后 / 用不了\n"
-    "- 怎么登录 / 反代 / 邮件接码\n\n"
-    "> ⚠️ 00:00-09:00 为免打扰时段，补货/新品通知暂停推送\n"
-    "> 该时段如需查看有货商品，请 @我 发分类指令"
+    "# 🤖 曼波导购bot 使用指南\n\n"
+    "👉 新手不知道怎么用成品号？先看这个：[点击查看教程](https://www.xtpu.asia/#/)\n\n"
+    "## 1️⃣ 按分类查看有货商品\n"
+    "@我 + 下面任意一个词：\n"
+    "`推荐` `gpt正价` `正价冲` `gpt` `接码` `claude` `gemini` `grok` `其他` `苹果id` `邮箱服务`\n\n"
+    "想看全部分类？@我 + `清单` / `菜单` / `menu`\n\n"
+    "## 2️⃣ 搜索想要的商品\n"
+    "@我 + 想找的东西，随便说都行，比如：\n"
+    "`@我 plus`　`@我 有没有codex`　`@我 想买个网页号`\n\n"
+    "## 3️⃣ 查看商品详情\n"
+    "先按分类或搜索看到列表，再 @我 + `详情 序号`（如 `详情 2`），或直接 @我 + `详情 商品名`\n\n"
+    "## 4️⃣ 常见问题一问就答\n"
+    "不管有没有 @我，发下面这些都会自动回复：\n"
+    "- 💬 店铺链接、在哪买\n"
+    "- 💬 质保首登、活多久、会封吗\n"
+    "- 💬 订单查询、订单卡密\n"
+    "- 💬 售后、用不了怎么办\n"
+    "- 💬 怎么登录、反代教程、邮箱接码\n"
+    "- 💬 2FA、密钥登录、防邮箱失效\n\n"
+    "---\n"
+    "⚠️ 00:00-09:00 是免打扰时段，补货/新品通知暂停推送\n"
+    "这段时间想看有货商品，@我 发分类指令依然实时有效～"
 )
 
 _keywords_cache: list[dict] | None = None
@@ -95,9 +102,10 @@ def _load_category_commands() -> dict[str, list[dict]]:
 
 
 def _match_keyword(text: str) -> dict | None:
+    text_lower = text.lower()
     for rule in _load_keywords():
         for kw in rule.get("keywords", []):
-            if kw in text:
+            if kw.lower() in text_lower:
                 return rule
     return None
 
@@ -153,6 +161,10 @@ def _search_by_tokens(products: dict, tokens: list[str]) -> list:
     return or_results
 
 
+# 每个用户最近一次查看的商品列表（分类指令/搜索结果），供"详情+序号"指令定位
+# key: (group_openid, member_openid)
+_last_shown: dict[tuple[str, str], list] = {}
+
 # 每条触发消息最多回复5条，用 msg_id 追踪当前 seq
 _seq: dict[str, int] = {}
 
@@ -172,24 +184,28 @@ async def _reply_markdown(message: GroupMessage, text: str) -> None:
     )
 
 
+async def _send_image_only(message: GroupMessage, image_url: str) -> None:
+    media = await message._api.post_group_file(
+        group_openid=message.group_openid,
+        file_type=1,
+        url=image_url,
+    )
+    await message._api.post_group_message(
+        group_openid=message.group_openid,
+        msg_type=7,
+        msg_id=message.id,
+        msg_seq=_next_seq(message.id),
+        media=media,
+    )
+
+
 async def _reply_image(message: GroupMessage, text: str, image_url: str) -> None:
     try:
         # 先发文字
         if text:
             await _reply_markdown(message, text)
-        media = await message._api.post_group_file(
-            group_openid=message.group_openid,
-            file_type=1,
-            url=image_url,
-        )
         # 再发图片
-        await message._api.post_group_message(
-            group_openid=message.group_openid,
-            msg_type=7,
-            msg_id=message.id,
-            msg_seq=_next_seq(message.id),
-            media=media,
-        )
+        await _send_image_only(message, image_url)
     except Exception as e:
         logger.warning(f"图片发送失败: {e}")
 
@@ -282,11 +298,23 @@ class BotHandlers(botpy.Client):
             await self._send_menu(message)
             return
 
+        # 关键词自动回复（店铺链接/质保/售后等 FAQ），@我 时也生效
+        kw_rule = _match_keyword(clean)
+        if kw_rule:
+            await self._send_keyword_reply(message, kw_rule)
+            return
+
         # 分类指令
         cat_match = _match_category_command(clean)
         if cat_match:
             cmd, categories = cat_match
             await self._send_category(message, cmd, categories)
+            return
+
+        # 商品详情：详情+序号（配合上一次列表）或 详情+商品名（配合搜索）
+        detail_match = _DETAIL_RE.match(clean)
+        if detail_match:
+            await self._handle_detail_command(message, detail_match.group(1).strip())
             return
 
         # 关键词搜索：先整体匹配，再 jieba 分词多词匹配
@@ -319,6 +347,10 @@ class BotHandlers(botpy.Client):
                 category_id=d.get("category_id"),
                 in_stock=d["in_stock"],
                 price=str(d.get("price", "")),
+                market_price=d.get("market_price", ""),
+                stock_count=d.get("stock_count", 0),
+                description=d.get("description", ""),
+                image=d.get("image", ""),
             )
             for pid, d in load_state().items()
             if d.get("listed", True)
@@ -329,10 +361,46 @@ class BotHandlers(botpy.Client):
 
     async def _send_category(self, message: GroupMessage, cmd: str, category_ids: list[int]):
         items = filter_category_products(self._state_to_products(), category_ids)
+        self._remember_shown(message, items)
         await _reply_markdown(message, format_category_products(items, cmd))
 
     async def _send_search_results(self, message: GroupMessage, term: str, results: list):
+        self._remember_shown(message, results)
         await _reply_markdown(message, format_search_results(term, results))
+
+    def _remember_shown(self, message: GroupMessage, items: list) -> None:
+        _last_shown[(message.group_openid, message.author.member_openid)] = items
+
+    async def _handle_detail_command(self, message: GroupMessage, arg: str) -> None:
+        product = None
+        if arg.isdigit():
+            shown = _last_shown.get((message.group_openid, message.author.member_openid))
+            index = int(arg) - 1
+            if shown and 0 <= index < len(shown):
+                product = shown[index]
+            else:
+                await _reply_markdown(message, "请先查看分类或搜索商品，再发送「详情+序号」～")
+                return
+        else:
+            products = self._state_to_products()
+            term = _extract_search_term(arg) if arg else ""
+            results = _search_by_title(products, term) if term else []
+            if not results and arg:
+                results = _search_by_tokens(products, _extract_search_tokens(arg))
+            if results:
+                product = results[0]
+            else:
+                await _reply_markdown(message, "没找到该商品，请发送「详情+序号」或「详情+商品名」～")
+                return
+        await self._send_product_detail(message, product)
+
+    async def _send_product_detail(self, message: GroupMessage, product) -> None:
+        await _reply_markdown(message, format_product_detail(product))
+        if product.image:
+            try:
+                await _send_image_only(message, product.image)
+            except Exception as e:
+                logger.warning(f"商品详情图片发送失败: {e}")
 
     async def _send_keyword_reply(self, message: GroupMessage, rule: dict):
         # 支持 replies 数组（随机选一条）或单条 reply
@@ -371,3 +439,6 @@ class BotHandlers(botpy.Client):
     async def send_relisted_notice(self, products: list) -> None:
         from bot.formatter import format_relisted_notice
         await self._broadcast(format_relisted_notice(products), "上架通知", len(products))
+
+    async def send_daily_digest(self, events: list) -> None:
+        await self._broadcast(format_daily_digest(events), "每日汇总", len(events))

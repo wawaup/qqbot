@@ -32,6 +32,10 @@ _bot_client = None
 # 同一 goods_key 无论触发的是新品/上架/补货中的哪一种，都共用这份冷却
 _notify_cooldown: dict[str, datetime] = {}
 
+# 静默时段（00:00-09:00）检测到的事件先缓冲在这里，09:00 由 daily_digest job 统一发送
+# key: product.id，同一商品多次触发时后写覆盖先写，天然去重
+_quiet_buffer: dict[str, tuple] = {}
+
 
 def _is_on_cooldown(product_id: str) -> bool:
     last = _notify_cooldown.get(product_id)
@@ -51,6 +55,16 @@ def _filter_cooldown(products: list) -> list:
     return [p for p in products if not _is_on_cooldown(p.id)]
 
 
+def _buffer_quiet_events(new_products: list, relisted_products: list, restocked_products: list) -> None:
+    """静默时段不发通知，但把事件记下来，09:00 由 daily_digest job 统一汇总发送。"""
+    for p in new_products:
+        _quiet_buffer[p.id] = ("new", p)
+    for p in relisted_products:
+        _quiet_buffer[p.id] = ("relisted", p)
+    for p in restocked_products:
+        _quiet_buffer[p.id] = ("restocked", p)
+
+
 def set_bot_client(client) -> None:
     global _bot_client
     _bot_client = client
@@ -61,7 +75,7 @@ async def scan_and_notify(first_run: bool = False) -> None:
 
     first_run=True 时只建立快照，不发通知（避免把全量商品误报为补货）。
     静默时段（00:00-09:00）仍然扫描并更新快照、正常做冷却标记，只跳过发送通知，
-    确保用户 @查询 时拿到的是最新库存数据。
+    确保用户 @查询 时拿到的是最新库存数据，也不会漏发静默时段检测到的事件。
     """
     logger.info("开始扫描商店库存...")
     try:
@@ -105,9 +119,10 @@ async def scan_and_notify(first_run: bool = False) -> None:
         f"新品 {len(new_products)} 个，上架 {len(relisted_products)} 个，补货 {len(restocked_products)} 个"
     )
 
-    # 静默时段只更新快照和冷却状态，不发通知
+    # 静默时段只更新快照和冷却状态，不发通知；事件缓冲起来，09:00 由 daily_digest job 统一汇总
     if _in_quiet_hours():
-        logger.debug("静默时段，跳过通知")
+        logger.debug("静默时段，跳过通知，缓冲事件")
+        _buffer_quiet_events(new_products, relisted_products, restocked_products)
         return
 
     if _bot_client is not None:
@@ -119,6 +134,17 @@ async def scan_and_notify(first_run: bool = False) -> None:
             await _bot_client.send_restock_notice(restocked_products)
 
 
+async def send_daily_digest() -> None:
+    """09:00 静默时段结束时触发，汇总发送这段时间缓冲的新品/上架/补货事件。"""
+    global _quiet_buffer
+    if not _quiet_buffer:
+        return
+    events = list(_quiet_buffer.values())
+    _quiet_buffer = {}
+    if _bot_client is not None:
+        await _bot_client.send_daily_digest(events)
+
+
 def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -126,6 +152,16 @@ def create_scheduler() -> AsyncIOScheduler:
         trigger="interval",
         seconds=SCAN_INTERVAL,
         id="shop_scan",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        send_daily_digest,
+        trigger="cron",
+        hour=QUIET_END,
+        minute=0,
+        timezone=CST,
+        id="daily_digest",
         replace_existing=True,
         max_instances=1,
     )

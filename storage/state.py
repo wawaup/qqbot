@@ -22,6 +22,10 @@ def load_state() -> dict[str, dict]:
         for entry in products.values():
             entry.setdefault("listed", True)  # 兼容旧格式：老数据都是当时在架的商品
             entry.setdefault("category_id", None)
+            entry.setdefault("market_price", "")
+            entry.setdefault("stock_count", 0)
+            entry.setdefault("description", "")
+            entry.setdefault("image", "")
         return products
     except (json.JSONDecodeError, KeyError):
         return {}
@@ -42,6 +46,10 @@ def save_state(products: dict[str, "Product"]) -> None:
             "category_id": p.category_id,
             "in_stock": p.in_stock,
             "price": p.price,
+            "market_price": p.market_price,
+            "stock_count": p.stock_count,
+            "description": p.description,
+            "image": p.image,
             "listed": True,
         }
     for pid, entry in merged.items():

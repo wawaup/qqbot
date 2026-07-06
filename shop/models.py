@@ -10,6 +10,10 @@ class Product:
     in_stock: bool
     price: str = ""
     category_id: int | None = None
+    market_price: str = ""
+    stock_count: int = 0
+    description: str = ""
+    image: str = ""
 
 
 @dataclass
