@@ -13,6 +13,7 @@ from config import (
     SHOP_URL,
 )
 from shop import scraper
+from shop.models import Product
 from storage import state
 
 CST = timezone(timedelta(hours=8))
@@ -125,22 +126,55 @@ async def scan_and_notify(first_run: bool = False) -> None:
         _buffer_quiet_events(new_products, relisted_products, restocked_products)
         return
 
+    # 非静默时段的重新上架不通知、也不缓冲，直接忽略
+
     if _bot_client is not None:
         if new_products:
             await _bot_client.send_new_product_notice(new_products)
-        if relisted_products:
-            await _bot_client.send_relisted_notice(relisted_products)
         if restocked_products:
             await _bot_client.send_restock_notice(restocked_products)
 
 
+def _revalidate_buffered_events(buffered: list[tuple[str, "Product"]]) -> list[tuple[str, "Product"]]:
+    """按最新快照重新校验缓冲事件：商品已下架/缺货/被下架商品清除的一律丢弃，
+    并用最新数据（价格等）刷新商品信息，避免汇总里出现失效商品或过期信息。
+    """
+    current_state = state.load_state()
+    events = []
+    for event_type, product in buffered:
+        entry = current_state.get(product.id)
+        if entry is None or not entry.get("listed", True) or not entry.get("in_stock", False):
+            continue
+        events.append((event_type, Product(
+            id=product.id,
+            title=entry["title"],
+            url=entry["url"],
+            category=entry["category"],
+            category_id=entry.get("category_id"),
+            in_stock=entry["in_stock"],
+            price=entry.get("price", ""),
+            description=entry.get("description", ""),
+        )))
+    return events
+
+
 async def send_daily_digest() -> None:
-    """09:00 静默时段结束时触发，汇总发送这段时间缓冲的新品/上架/补货事件。"""
+    """09:00 静默时段结束时触发，汇总发送这段时间缓冲的新品/上架/补货事件。
+
+    发送前用最新快照重新校验，过滤掉已经失效（被下架、删除或缺货）的商品，
+    避免把一整晚的变化里已经不存在的商品也发出来。
+    """
     global _quiet_buffer
     if not _quiet_buffer:
         return
-    events = list(_quiet_buffer.values())
+    buffered = list(_quiet_buffer.values())
     _quiet_buffer = {}
+
+    events = _revalidate_buffered_events(buffered)
+    if not events:
+        logger.info("每日汇总：缓冲的商品均已失效或缺货，跳过发送")
+        return
+
     if _bot_client is not None:
         await _bot_client.send_daily_digest(events)
 

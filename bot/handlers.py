@@ -428,9 +428,5 @@ class BotHandlers(botpy.Client):
         from bot.formatter import format_new_product_notice
         await self._broadcast(format_new_product_notice(products), "新品通知", len(products))
 
-    async def send_relisted_notice(self, products: list) -> None:
-        from bot.formatter import format_relisted_notice
-        await self._broadcast(format_relisted_notice(products), "上架通知", len(products))
-
     async def send_daily_digest(self, events: list) -> None:
         await self._broadcast(format_daily_digest(events), "每日汇总", len(events))

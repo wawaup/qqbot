@@ -108,10 +108,3 @@ def format_new_product_notice(products: list["Product"]) -> str:
     for p in products:
         lines.append(_notice_line(p))
     return "\n".join(lines)
-
-
-def format_relisted_notice(products: list["Product"]) -> str:
-    lines = ["# 🔄 商品重新上架"]
-    for p in products:
-        lines.append(_notice_line(p))
-    return "\n".join(lines)
