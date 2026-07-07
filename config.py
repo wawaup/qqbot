@@ -19,10 +19,7 @@ KEYWORDS_FILE = "keywords.json"
 CATEGORY_COMMANDS_FILE = "category_commands.json"
 
 # 补货/上新/上架通知屏蔽的分类（按分类 id 匹配，不受改名影响）
-# 73959 = 苹果id/谷歌/微软/iCloud邮箱
-NOTIFY_EXCLUDE_CATEGORIES: set[int] = {
-    73959,
-}
+NOTIFY_EXCLUDE_CATEGORIES: set[int] = set()
 
 # 同一商品两次通知之间的最小间隔（秒），防止反复上架/补货刷屏，默认 15 分钟
 # 覆盖新品/上架/补货三种事件，同一 goods_key 共用一份冷却
