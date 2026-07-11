@@ -82,7 +82,7 @@ qqbot/
 
 `on_group_message_create` 检测消息里是否含 `<@BOT_OPENID>`，是则走指令流程。
 
-**引用回复过滤**：`message_reference.message_id` 非 None 说明是引用别人消息的回复，@bot 可能来自被引用的旧消息，此时忽略指令只做关键词匹配。
+**引用回复过滤**：`bot/handlers.py` 用 `<@BOT_OPENID>` 在 `content` 里出现的次数判断——引用回复时被引用消息的 `<@botid>` 也会算进 `content`，导致 @tag 出现两次及以上（`at_count > 1`），直接 @ 只会出现一次。一旦判定是"引用消息中带出的 @bot"（`is_reference_reply`），说明这次 @ 不是用户主动发起的，**指令路由和关键词自动回复都不触发**，直接忽略；只有不带引用的普通消息才会走关键词自动回复。
 
 指令优先级（从高到低）：
 

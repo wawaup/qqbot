@@ -5,7 +5,7 @@
     "image": "pics/展开商品说明.png"
   },
   {
-    "keywords": ["质保首登", "有效期", "稳不稳", "活多久", "能用多久", "会封吗","成品号稳吗"],
+    "keywords": [ "质保说明"],
     "reply": "## 质保说明\n\n本店成品号/日抛号包括 team 大部分**只质保首登**，具体发货格式与使用方式请仔细查看商品标题和商品说明。\n\n由于 OpenAI 的风控机制一直在变，并且针对不同渠道的封号行动持续进行，具体能用多久不是我们能控制的。\n\n不封号那就是使用一个月（库存号除外）～历史统计数据也不适用于大封号的情况，所以**按需购买尽快蹬完周限**才是王道 ^^ 感谢您的支持哦 \n\n > 特别提示：上新模型和大封号期间再稳定的渠道封号概率都会增加，因为这不是正价充值的账号，个人能做的就是尽量用纯净些的 ip 不乱切国家，给自己账号设置单独的密码，绑定2fa/passkey让账号看起来更像专业的用户而不是批量注册的，剩下就是看运气。再举个比较具体的例子，同样都是paypal支付渠道四五月份成本低到只要几块钱就能稳用一个月，并且没有手机号验证这回事，因为那个时候 openai 压根没开始封号，同样的渠道六月份封到一个新号开不出来，断货了将近一个星期。不同时期产新号的风控程度不一样，大部分一周前的号能活到现在不代表风控期间这两天的新号也能活一周。没有对成品号的基础认知不建议购买，请购买正价充值",
     "image": "pics/meme2.jpg"
   },
@@ -30,8 +30,8 @@
     "image": ""
   },
   {
-    "keywords": ["邮箱失效", "邮箱风控", "邮箱验证码收不到", "icloud邮箱", "iCloud邮箱", "outlook邮箱", "邮箱被封", "收不到验证码", "邮箱登录不了", "防邮箱失效", "绑定 2fa","绑定 passkey","设置独立密码","账号保护","账号防护"],
-    "reply": "## GPT账号防邮箱失效指南\n\n> 近期 iCloud、Outlook 等邮箱风控加强，所有gpt账号均适用此方法，强烈建议操作！\n\n### 步骤 1：设置独立登录密码\n\n1. 登录 ChatGPT 后，点击左下角头像进入 **Settings（设置）**\n2. 选择 **Security & Login（账户安全与登录）**\n3. 找到密码设置项，设置一个专属密码\n\n\n ### 步骤 2：开启 2FA，绑定双重验证不依赖邮箱\n\n在同页面开启 **Authenticator app（双重验证）**，会弹出一个二维码页面，接下来用 Authenticator app完成绑定：\n\n1. 手机下载 **Google Authenticator**（或其他 Authenticator app）\n2. 用 app 直接扫二维码页面上的码，完成添加\n3. app 会显示 6 位验证码，把这串验证码填到 ChatGPT 页面确认，绑定完成 \n\n\n ### 步骤3：绑定 passkey(目前看安全优先级最高)**\n1.同样是选择 **Security & Login（账户安全与登录）**，在密码下方选择 **Security keys & passkeys** \n2.点击“Add a Security key or passkey“，先完成账户验证，然后选择 **create passkey**\n3. 选择一种合适的方式Face ID,Touch ID,device pin作为你的 passkey 用于以后登录，随官方页面指引操作即可，不会的可截图问 AI \n\n\n **绑定后登录方式：** 密码 + 打开 Authenticator app看验证码或直接设备 passkey 登入，再也不依赖邮箱接码 ✅",
+    "keywords": ["邮箱风控", "防邮箱失效", "绑定 2fa","绑定 passkey","设置独立密码","账号保护","账号防护"],
+    "reply": "## GPT账号防邮箱失效指南\n\n> 近期 iCloud、Outlook 等邮箱风控加强，所有gpt账号均适用此方法，强烈建议操作！\n\n### 步骤 1：设置独立登录密码\n\n1. 登录 ChatGPT 后，点击左下角头像进入 **Settings（设置）**\n2. 选择 **Security & Login（账户安全与登录）**\n3. 找到密码设置项，设置一个专属密码\n\n\n ### 步骤 2：开启 2FA，绑定双重验证不依赖邮箱\n\n在同页面开启 **Authenticator app（双重验证）**，会弹出一个二维码页面，接下来用 Authenticator app完成绑定：\n\n1. 手机下载 **Google Authenticator**（或其他 Authenticator app）\n2. 用 app 直接扫二维码页面上的码，完成添加\n3. app 会显示 6 位验证码，把这串验证码填到 ChatGPT 页面确认，绑定完成 \n\n\n ### 步骤3：配置 Passkey（目前看安全优先级最高）\n1.同样是选择 **Security & Login（账户安全与登录）**，在密码下方选择 **Security keys & passkeys** \n2.点击“Add a Security key or passkey“，先完成账户验证，然后选择 **create passkey**\n3. 选择一种合适的方式Face ID,Touch ID,device pin作为你的 passkey 用于以后登录，随官方页面指引操作即可，不会的可截图问 AI \n\n\n **绑定后登录方式：** 密码 + 打开 Authenticator app看验证码或直接设备 passkey 登入，再也不依赖邮箱接码 ✅",
     "image": ""
   },
   {

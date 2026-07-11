@@ -277,9 +277,10 @@ class BotHandlers(botpy.Client):
             if is_at_bot and not is_reference_reply:
                 clean = re.sub(r"<@[^>]+>", "", content).strip()
                 await self._handle_at_command(message, clean)
+            elif is_reference_reply:
+                # @bot 来自被引用的旧消息，不是用户这次主动发起的，指令和关键词匹配都不触发
+                logger.info("[群消息] 引用回复中的 @bot 来自被引用消息，忽略，不触发任何规则")
             else:
-                if is_reference_reply and is_at_bot:
-                    logger.info("[群消息] 引用回复含 @bot，忽略指令，仅做关键词匹配")
                 rule = _match_keyword(content)
                 if rule:
                     await self._send_keyword_reply(message, rule)
