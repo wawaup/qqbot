@@ -27,8 +27,8 @@ NOTIFY_COOLDOWN: int = int(os.getenv("NOTIFY_COOLDOWN", "900"))
 
 # keywords.json 的 image 字段 → 图片直链映射
 PICS_URLS: dict[str, str] = {
-    "pics/展开商品说明.png": "https://s41.ax1x.com/2026/06/24/pmtnnc6.png",
-    "pics/meme1.jpg":       "https://s41.ax1x.com/2026/06/24/pmtnVhR.jpg",
-    "pics/meme2.jpg":       "https://s41.ax1x.com/2026/06/24/pmtne91.jpg",
-    "pics/meme3.jpg":       "https://s41.ax1x.com/2026/06/24/pmtnm1x.jpg",
+    "pics/展开商品说明.png": "http://120.27.141.92/pics/expand-tip.png",
+    "pics/meme1.jpg":       "http://120.27.141.92/pics/meme1.jpg",
+    "pics/meme2.jpg":       "http://120.27.141.92/pics/meme2.jpg",
+    "pics/meme3.jpg":       "http://120.27.141.92/pics/meme3.jpg",
 }
