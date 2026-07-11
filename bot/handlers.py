@@ -29,6 +29,20 @@ from storage.state import load_state
 
 logger = logging.getLogger(__name__)
 
+# 引用/回复消息的 message_type，QQ 原始 payload 里才有，botpy 的 GroupMessage 没有解析这个字段
+REFERENCE_REPLY_MESSAGE_TYPE = 103
+
+
+class _GroupMessageWithType(GroupMessage):
+    """在 GroupMessage 基础上带上原始 message_type，用来判断是否为引用/回复消息。"""
+
+    __slots__ = ("message_type",)
+
+    def __init__(self, api, event_id, data):
+        super().__init__(api, event_id, data)
+        self.message_type = data.get("message_type", 0)
+
+
 MENU_KEYWORDS = {"menu", "清单", "菜单", "商品清单", "有什么", "卖什么"}
 
 # 直接触发使用指南的词（@bot 后面只有这些词，或什么都没跟）
@@ -231,14 +245,24 @@ class BotHandlers(botpy.Client):
         self._patch_group_message_parser()
 
     def _patch_group_message_parser(self):
+        """botpy 默认的 GroupMessage 不解析 message_type 字段，而这个字段（103=引用/回复消息）
+        是唯一能区分"引用回复"和"直接发消息"的信号，所以两个 group 消息 parser 都要重新注册，
+        换成会带上 message_type 的 _GroupMessageWithType。"""
         state = self._connection.state
 
         def parse_group_message_create(payload):
-            msg = GroupMessage(state.api, payload.get("id"), payload.get("d", {}))
+            msg = _GroupMessageWithType(state.api, payload.get("id"), payload.get("d", {}))
             state._dispatch("group_message_create", msg)
 
         state.parsers["group_message_create"] = parse_group_message_create
         logger.info("group_message_create 事件已注册")
+
+        def parse_group_at_message_create(payload):
+            msg = _GroupMessageWithType(state.api, payload.get("id"), payload.get("d", {}))
+            state._dispatch("group_at_message_create", msg)
+
+        state.parsers["group_at_message_create"] = parse_group_at_message_create
+        logger.info("group_at_message_create 事件已注册")
 
     async def on_group_add_robot(self, event: GroupManageEvent):
         logger.info(f"[群管理] 机器人加入群 group_openid={event.group_openid}")
@@ -249,19 +273,15 @@ class BotHandlers(botpy.Client):
     async def on_group_at_message_create(self, message: GroupMessage):
         """有人 @机器人 时触发。"""
         content = message.content or ""
-        bot_tag = f"<@{BOT_OPENID}>" if BOT_OPENID else None
-        # 引用回复时 content 里会带出被引用消息里的 <@botid>，导致 @tag 出现两次及以上；
-        # 直接 @ 只会出现一次。与 on_group_message_create 保持一致的判定逻辑
-        at_count = content.count(bot_tag) if bot_tag else len(re.findall(r"<@[^>]+>", content))
-        is_reference_reply = at_count > 1
+        is_reference_reply = getattr(message, "message_type", 0) == REFERENCE_REPLY_MESSAGE_TYPE
         logger.info(
             f"[AT消息] group_openid={message.group_openid} "
-            f"id={message.id} content={content!r} at_count={at_count} is_ref={is_reference_reply}"
+            f"id={message.id} content={content!r} is_ref={is_reference_reply}"
         )
         try:
             if is_reference_reply:
-                # @bot 来自被引用的旧消息，不是用户这次主动发起的，忽略
-                logger.info("[AT消息] 引用回复中的 @bot 来自被引用消息，忽略，不触发任何规则")
+                # 引用/回复消息带出的 @bot 不是这次主动发起的指令，忽略
+                logger.info("[AT消息] 引用/回复消息，忽略，不触发任何规则")
                 return
             clean = re.sub(r"<@[^>]+>", "", content).strip()
             await self._handle_at_command(message, clean)
@@ -276,20 +296,17 @@ class BotHandlers(botpy.Client):
             # 只响应 @自己，忽略 @其他人的消息
             bot_tag = f"<@{BOT_OPENID}>" if BOT_OPENID else None
             is_at_bot = (bot_tag and bot_tag in content) or (not BOT_OPENID and bool(re.search(r"<@[^>]+>", content)))
-            # 引用回复时 content 里会包含被引用消息的 <@botid>，导致 @tag 出现两次
-            # 直接@只有一次，引用@有两次或以上
-            at_count = content.count(bot_tag) if bot_tag else len(re.findall(r"<@[^>]+>", content))
-            is_reference_reply = at_count > 1
+            is_reference_reply = getattr(message, "message_type", 0) == REFERENCE_REPLY_MESSAGE_TYPE
             logger.info(
                 f"[群消息] group_openid={message.group_openid} "
-                f"content={content!r} at_count={at_count} is_at={is_at_bot} is_ref={is_reference_reply}"
+                f"content={content!r} is_at={is_at_bot} is_ref={is_reference_reply}"
             )
-            if is_at_bot and not is_reference_reply:
+            if is_reference_reply:
+                # 引用/回复消息不是这次主动发起的，指令和关键词匹配都不触发
+                logger.info("[群消息] 引用/回复消息，忽略，不触发任何规则")
+            elif is_at_bot:
                 clean = re.sub(r"<@[^>]+>", "", content).strip()
                 await self._handle_at_command(message, clean)
-            elif is_reference_reply:
-                # @bot 来自被引用的旧消息，不是用户这次主动发起的，指令和关键词匹配都不触发
-                logger.info("[群消息] 引用回复中的 @bot 来自被引用消息，忽略，不触发任何规则")
             else:
                 rule = _match_keyword(content)
                 if rule:
