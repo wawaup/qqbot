@@ -71,11 +71,11 @@ HELP_TEXT = (
     "## 4️⃣ 常见问题一问就答\n"
     "不管有没有 @我，发下面这些都会自动回复：\n"
     "- 💬 店铺链接、在哪买\n"
-    "- 💬 质保首登、活多久、会封吗\n"
-    "- 💬 订单查询、订单卡密\n"
-    "- 💬 售后、用不了怎么办\n"
-    "- 💬 怎么登录、反代教程、邮箱接码\n"
-    "- 💬 2FA、密钥登录、防邮箱失效\n\n"
+    "- 💬 质保说明\n"
+    "- 💬 订单查询、订单详情、订单卡密\n"
+    "- 💬 售后服务、用不了怎么办\n"
+    "- 💬 怎么登录、反代教程、邮箱接码怎么弄\n"
+    "- 💬 2FA登录、密钥登录、邮箱风控/防邮箱失效\n\n"
     "---\n"
     "⚠️ 00:00-09:00 是免打扰时段，补货/新品通知暂停推送\n"
     "这段时间想看有货商品，@我 发分类指令依然实时有效～"
@@ -248,12 +248,22 @@ class BotHandlers(botpy.Client):
 
     async def on_group_at_message_create(self, message: GroupMessage):
         """有人 @机器人 时触发。"""
+        content = message.content or ""
+        bot_tag = f"<@{BOT_OPENID}>" if BOT_OPENID else None
+        # 引用回复时 content 里会带出被引用消息里的 <@botid>，导致 @tag 出现两次及以上；
+        # 直接 @ 只会出现一次。与 on_group_message_create 保持一致的判定逻辑
+        at_count = content.count(bot_tag) if bot_tag else len(re.findall(r"<@[^>]+>", content))
+        is_reference_reply = at_count > 1
         logger.info(
             f"[AT消息] group_openid={message.group_openid} "
-            f"id={message.id} content={message.content!r}"
+            f"id={message.id} content={content!r} at_count={at_count} is_ref={is_reference_reply}"
         )
         try:
-            clean = re.sub(r"<@[^>]+>", "", message.content).strip()
+            if is_reference_reply:
+                # @bot 来自被引用的旧消息，不是用户这次主动发起的，忽略
+                logger.info("[AT消息] 引用回复中的 @bot 来自被引用消息，忽略，不触发任何规则")
+                return
+            clean = re.sub(r"<@[^>]+>", "", content).strip()
             await self._handle_at_command(message, clean)
         except Exception:
             logger.error(f"[AT消息] 处理异常:\n{traceback.format_exc()}")
