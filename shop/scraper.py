@@ -9,7 +9,7 @@
 """
 import json
 import sys
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -37,6 +37,26 @@ def _clean_description(html: str) -> str:
     return BeautifulSoup(html, "html.parser").get_text("\n", strip=True)
 
 
+def _extract_detail_image_urls(html: str) -> tuple[str, ...]:
+    soup = BeautifulSoup(html or "", "html.parser")
+    urls = []
+    for image in soup.find_all("img"):
+        raw_url = next(
+            (
+                image.get(attribute)
+                for attribute in ("src", "data-src", "data-href")
+                if isinstance(image.get(attribute), str)
+                and image.get(attribute).strip()
+            ),
+            None,
+        )
+        if raw_url:
+            url = urljoin("https://pay.ldxp.cn/", raw_url.strip())
+            if url not in urls:
+                urls.append(url)
+    return tuple(urls)
+
+
 async def scan_all(shop_url: str) -> dict[str, Product]:
     """请求商品列表接口，返回 {goods_key: Product} 字典。"""
     token = _extract_token(shop_url)
@@ -62,6 +82,12 @@ async def scan_all(shop_url: str) -> dict[str, Product]:
         stock_count = item.get("extend", {}).get("stock_count", 0)
         category = item.get("category", {})
         category_name = category.get("name", "其他")
+        description_html = item.get("description", "")
+        if not isinstance(description_html, str):
+            description_html = ""
+        cover_url = item.get("image", "")
+        if not isinstance(cover_url, str):
+            cover_url = ""
 
         products[goods_key] = Product(
             id=goods_key,
@@ -71,7 +97,11 @@ async def scan_all(shop_url: str) -> dict[str, Product]:
             category_id=category.get("id"),
             in_stock=stock_count > 0,
             price=str(item.get("price", "")),
-            description=_clean_description(item.get("description", "")),
+            stock_count=stock_count,
+            description=_clean_description(description_html),
+            description_html=description_html,
+            cover_url=cover_url,
+            detail_image_urls=_extract_detail_image_urls(description_html),
         )
 
     return products

@@ -10,9 +10,27 @@ BOT_OPENID = os.getenv("BOT_OPENID", "")  # 机器人在群里的 member openid�
 # 支持多群：逗号分隔，如 "openid1,openid2"
 GROUP_OPENIDS = [g.strip() for g in os.getenv("GROUP_OPENIDS", "").split(",") if g.strip()]
 
+# 商品说明/图片变化使用独立目标，不与补货通知群共用。
+CONTENT_CHANGE_GROUP_OPENIDS = [
+    value.strip()
+    for value in os.getenv("CONTENT_CHANGE_GROUP_OPENIDS", "").split(",")
+    if value.strip()
+]
+CONTENT_CHANGE_USER_OPENIDS = [
+    value.strip()
+    for value in os.getenv("CONTENT_CHANGE_USER_OPENIDS", "").split(",")
+    if value.strip()
+]
+
 SHOP_URL = os.getenv("SHOP_URL", "https://pay.ldxp.cn/shop/manboup")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))
+CONTENT_CHECK_INTERVAL = int(os.getenv("CONTENT_CHECK_INTERVAL", "600"))
 SANDBOX = os.getenv("SANDBOX", "false").lower() == "true"
+
+STATUS_API_ENABLED = os.getenv("STATUS_API_ENABLED", "true").lower() == "true"
+STATUS_API_HOST = os.getenv("STATUS_API_HOST", "0.0.0.0")
+STATUS_API_PORT = int(os.getenv("STATUS_API_PORT", "8080"))
+STATUS_API_ALLOWED_ORIGIN = os.getenv("STATUS_API_ALLOWED_ORIGIN", "*")
 
 STATE_FILE = "state.json"
 KEYWORDS_FILE = "keywords.json"

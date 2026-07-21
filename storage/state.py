@@ -12,21 +12,30 @@ if TYPE_CHECKING:
 _STATE_FILE = Path("state.json")
 
 
-def load_state() -> dict[str, dict]:
-    """加载上次快照，返回 {product_id: {...}} 字典。"""
+def load_snapshot() -> dict:
+    """加载完整快照，同时兼容旧版状态文件。"""
     if not _STATE_FILE.exists():
-        return {}
+        return {"last_scan": None, "products": {}}
     try:
         data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
         products = data.get("products", {})
         for entry in products.values():
             entry.setdefault("listed", True)  # 兼容旧格式：老数据都是当时在架的商品
             entry.setdefault("category_id", None)
+            entry.setdefault("stock_count", 0)
+            entry.setdefault("description_html", "")
+            entry.setdefault("cover_url", "")
+            entry.setdefault("detail_image_urls", [])
             if not isinstance(entry.get("description"), str):
                 entry["description"] = ""  # 兼容曾经的 list[dict] 片段格式
-        return products
-    except (json.JSONDecodeError, KeyError):
-        return {}
+        return {"last_scan": data.get("last_scan"), "products": products}
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return {"last_scan": None, "products": {}}
+
+
+def load_state() -> dict[str, dict]:
+    """加载上次快照，返回 {product_id: {...}} 字典。"""
+    return load_snapshot()["products"]
 
 
 def save_state(products: dict[str, "Product"]) -> None:
@@ -44,18 +53,29 @@ def save_state(products: dict[str, "Product"]) -> None:
             "category_id": p.category_id,
             "in_stock": p.in_stock,
             "price": p.price,
+            "stock_count": p.stock_count,
             "description": p.description,
+            "description_html": p.description_html,
+            "cover_url": p.cover_url,
+            "detail_image_urls": list(p.detail_image_urls),
             "listed": True,
         }
     for pid, entry in merged.items():
         if pid not in products:
             entry["listed"] = False
+            entry["in_stock"] = False
+            entry["stock_count"] = 0
 
     data = {
         "last_scan": datetime.now().isoformat(timespec="seconds"),
         "products": merged,
     }
-    _STATE_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary_file = _STATE_FILE.with_name(f".{_STATE_FILE.name}.tmp")
+    temporary_file.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary_file.replace(_STATE_FILE)
 
 
 def diff_states(

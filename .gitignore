@@ -3,6 +3,7 @@
 
 # 运行时状态快照
 state.json
+content_state.json
 
 # 日志（含轮转文件）
 botpy.log

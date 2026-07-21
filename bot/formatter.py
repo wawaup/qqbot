@@ -108,3 +108,23 @@ def format_new_product_notice(products: list["Product"]) -> str:
     for p in products:
         lines.append(_notice_line(p))
     return "\n".join(lines)
+
+
+_CONTENT_CHANGE_LABELS = {
+    "new_product": "新增商品",
+    "title": "商品标题",
+    "description": "商品说明",
+    "cover": "商品封面",
+    "detail_images": "详情图片",
+}
+
+
+def format_content_change_notice(changes: list) -> str:
+    lines = ["# 📝 商品资料变化待处理"]
+    lines.append(f"发现 {len(changes)} 个商品的说明或图片来源发生变化，请同步 shop-navigator 后检查。")
+    for change in changes[:10]:
+        labels = "、".join(_CONTENT_CHANGE_LABELS[field] for field in change.changed_fields)
+        lines.extend((f"\n## {change.title}", f"变化：{labels}", change.url))
+    if len(changes) > 10:
+        lines.append(f"\n另有 {len(changes) - 10} 个商品发生变化，请查看服务器日志。")
+    return "\n".join(lines)

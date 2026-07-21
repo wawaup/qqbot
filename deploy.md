@@ -16,6 +16,33 @@ Ubuntu 22.04 完全可以，是目前最主流的选择，systemd 原生支持�
 3. 服务器上安装依赖
    cd ~/qqbot
    uv sync
+
+   在 `.env` 中配置状态接口：
+
+   ```dotenv
+   STATUS_API_ENABLED=true
+   STATUS_API_HOST=0.0.0.0
+   STATUS_API_PORT=8080
+   STATUS_API_ALLOWED_ORIGIN=https://你的商品导航域名
+   CONTENT_CHECK_INTERVAL=600
+   CONTENT_CHANGE_GROUP_OPENIDS=8BCFB82E1F69A44440B64F2766022549
+   CONTENT_CHANGE_USER_OPENIDS=
+   ```
+
+   `GROUP_OPENIDS` 只用于补货/新品通知；留空不会发送这类主动通知。
+   商品说明、封面或详情图片 URL 变化只发送到
+   `CONTENT_CHANGE_GROUP_OPENIDS`。私信目标必须填写 QQ 开放平台分配的
+   `user_openid`，普通 QQ 号或群号不能直接用于主动消息。
+
+   `shop-navigator` 的构建环境需要配置：
+
+   ```dotenv
+   VITE_PRODUCT_STATUS_API_URL=https://你的接口域名/api/v1/catalog/status
+   ```
+
+   建议由 Nginx/Caddy 给 8080 端口配置 HTTPS 反向代理，不要让 HTTPS
+   网站直接请求 HTTP 接口。部署后可用 `curl http://127.0.0.1:8080/healthz`
+   和 `curl http://127.0.0.1:8080/api/v1/catalog/status` 验证。
 4. 确认 python 路径
    uv run which python
 

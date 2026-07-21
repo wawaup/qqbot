@@ -7,6 +7,7 @@ from datetime import datetime, timezone, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import (
+    CONTENT_CHECK_INTERVAL,
     NOTIFY_COOLDOWN,
     NOTIFY_EXCLUDE_CATEGORIES,
     SCAN_INTERVAL,
@@ -15,6 +16,7 @@ from config import (
 from shop import scraper
 from shop.models import Product
 from storage import state
+from storage import content_state
 
 CST = timezone(timedelta(hours=8))
 QUIET_START = 0   # 00:00
@@ -154,6 +156,7 @@ def _revalidate_buffered_events(buffered: list[tuple[str, "Product"]]) -> list[t
             category_id=entry.get("category_id"),
             in_stock=entry["in_stock"],
             price=entry.get("price", ""),
+            stock_count=entry.get("stock_count", 0),
             description=entry.get("description", ""),
         )))
     return events
@@ -180,8 +183,41 @@ async def send_daily_digest() -> None:
         await _bot_client.send_daily_digest(events)
 
 
+async def check_catalog_content_changes() -> None:
+    """定期比较商品标题、说明、封面及详情图 URL，只在变化时通知。"""
+    current = content_state.build_snapshot(state.load_state())
+    previous = content_state.load_snapshot()
+    if not previous:
+        content_state.save_snapshot(current)
+        logger.info("商品资料基线已建立：共 %s 个商品", len(current))
+        return
+
+    changes = content_state.diff_snapshots(previous, current)
+    if not changes:
+        logger.info("商品资料检查完成：无变化")
+        return
+    if _bot_client is None:
+        logger.warning("发现 %s 个商品资料变化，但机器人尚未就绪", len(changes))
+        return
+
+    sent = await _bot_client.send_content_change_notice(changes)
+    if sent:
+        content_state.save_snapshot(current)
+        logger.info("商品资料变化已通知：%s 个商品", len(changes))
+    else:
+        logger.warning("商品资料变化通知未发送，保留差异供下次重试")
+
+
 def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
+    scheduler.add_job(
+        check_catalog_content_changes,
+        trigger="interval",
+        seconds=CONTENT_CHECK_INTERVAL,
+        id="catalog_content_check",
+        replace_existing=True,
+        max_instances=1,
+    )
     scheduler.add_job(
         scan_and_notify,
         trigger="interval",

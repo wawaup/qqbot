@@ -9,8 +9,12 @@ class Product:
     category: str
     in_stock: bool
     price: str = ""
+    stock_count: int = 0
     category_id: int | None = None
     description: str = ""
+    description_html: str = ""
+    cover_url: str = ""
+    detail_image_urls: tuple[str, ...] = ()
 
 
 @dataclass

@@ -448,6 +448,41 @@ class BotHandlers(botpy.Client):
             except Exception as e:
                 logger.error(f"[{group_openid}] {label}失败: {e}")
 
+    async def send_content_change_notice(self, changes: list) -> bool:
+        from bot.formatter import format_content_change_notice
+        from config import CONTENT_CHANGE_GROUP_OPENIDS, CONTENT_CHANGE_USER_OPENIDS
+
+        if not CONTENT_CHANGE_GROUP_OPENIDS and not CONTENT_CHANGE_USER_OPENIDS:
+            logger.warning("商品资料变化通知目标未配置")
+            return False
+
+        text = format_content_change_notice(changes)
+        sent = False
+        for group_openid in CONTENT_CHANGE_GROUP_OPENIDS:
+            try:
+                await self.api.post_group_message(
+                    group_openid=group_openid,
+                    msg_type=2,
+                    markdown=msg_types.MarkdownPayload(content=text),
+                )
+                logger.info("[%s] 商品资料变化通知已发送", group_openid)
+                sent = True
+            except Exception as error:
+                logger.error("[%s] 商品资料变化通知失败: %s", group_openid, error)
+
+        for user_openid in CONTENT_CHANGE_USER_OPENIDS:
+            try:
+                await self.api.post_c2c_message(
+                    openid=user_openid,
+                    msg_type=2,
+                    markdown=msg_types.MarkdownPayload(content=text),
+                )
+                logger.info("[%s] 商品资料变化私信已发送", user_openid)
+                sent = True
+            except Exception as error:
+                logger.error("[%s] 商品资料变化私信失败: %s", user_openid, error)
+        return sent
+
     async def send_restock_notice(self, products: list) -> None:
         from bot.formatter import format_restock_notice
         await self._broadcast(format_restock_notice(products), "补货通知", len(products))
