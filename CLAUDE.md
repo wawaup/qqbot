@@ -8,18 +8,19 @@ QQ 群机器人，监控 `pay.ldxp.cn/shop/manboup` 的商品库存变化，自�
 
 ## 常用命令
 
+日常启动见 [`README.md`](README.md)。对接 shop-core 时不必装 Playwright。
+
 ```bash
 # 安装依赖（需要先安装 uv）
 uv sync
-uv run playwright install chromium
+# 仅 INVENTORY_SOURCE=ldxp 时需要：
+# uv run playwright install chromium
 
-# 调试爬虫（保存页面HTML + 打印解析结果，用来校准选择器）
+# 调试爬虫（仅 ldxp 源）
 uv run python -m shop.scraper --debug
-
-# 验证爬虫正常工作
 uv run python -m shop.scraper
 
-# 启动机器人
+# 启动机器人（先保证 shop-core :18080 可用）
 uv run python main.py
 ```
 
@@ -135,7 +136,9 @@ qqbot/
 ### 7. 上新审核 Skill（C2C）
 
 - 实现：`bot/review.py` + `storage/review_sessions.py` + `bot/warranty.py`
-- **先清单后开审**：私聊 `待审清单`（或单独发 `审核`）→ 按序号回复 `1` / `审核 1` 再进入具体审核
+- **两张清单**（互不混排，序号各自从 1 起；最近一次清单用于 `1` / `审核 1`）：
+  1. `待审清单` / `审核`：资料变更再审（shop-core review-queue + 已挂 surface 的 catalog 待审）。**不含** hidden 首次上架；文末提示「另有 N 个未上架 → 发 `上架审核`」
+  2. `上架审核` / `待上架`：导航站仍为 **hidden / 未公开** 的商品，走首次上架
 - 其它指令：`审核 <product_id>` / `审核测试` / `审核状态` / `审核帮助`
 - 审核中回复语义：
   - `可以` / `OK` → **提交草稿并完成**（移出待审）
@@ -144,7 +147,7 @@ qqbot/
   - 其它长句 → 修改意见，Grok 重拟后再审
   - `取消` → 退出本轮，不标记完成，仍在清单
 - 私聊稿同时展示**原标题 vs 建议标题**；详情 HTML 按来源同步，不经模型改写
-- 确认后写入：`shop-navigator/data/overrides/products/{id}.json` 等；省略只改 review-queue 状态
+- 确认后优先 `shop-core` publish；失败再回退 navigator overrides（若 `REVIEW_APPLY_ENABLED`）
 - **成品号质保特例**（`bot/warranty.py` + `content_state.diff_snapshots`）：
   - 标题仅「上架/补货时间」话术变化、质保天数不变 → **不通知**
   - 质保天数缩短（如 30→25）→ **强制通知并置顶**
