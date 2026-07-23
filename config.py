@@ -27,10 +27,21 @@ SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))
 CONTENT_CHECK_INTERVAL = int(os.getenv("CONTENT_CHECK_INTERVAL", "600"))
 SANDBOX = os.getenv("SANDBOX", "false").lower() == "true"
 
+# shop-core shared backend. When configured, inventory is read from core instead of LDXP scrape.
+SHOP_CORE_BASE_URL = os.getenv("SHOP_CORE_BASE_URL", "").rstrip("/")
+SHOP_CORE_INTERNAL_TOKEN = os.getenv("SHOP_CORE_INTERNAL_TOKEN", "")
+SHOP_CORE_TIMEOUT_SECONDS = float(os.getenv("SHOP_CORE_TIMEOUT_SECONDS", "15"))
+INVENTORY_SOURCE = os.getenv(
+    "INVENTORY_SOURCE",
+    "shop-core" if SHOP_CORE_BASE_URL else "ldxp",
+).strip().lower()
+
 STATUS_API_ENABLED = os.getenv("STATUS_API_ENABLED", "true").lower() == "true"
 STATUS_API_HOST = os.getenv("STATUS_API_HOST", "0.0.0.0")
 STATUS_API_PORT = int(os.getenv("STATUS_API_PORT", "8080"))
 STATUS_API_ALLOWED_ORIGIN = os.getenv("STATUS_API_ALLOWED_ORIGIN", "*")
+# When true and shop-core is configured, local status API proxies core status.
+STATUS_API_PROXY_CORE = os.getenv("STATUS_API_PROXY_CORE", "true").lower() == "true"
 
 STATE_FILE = "state.json"
 KEYWORDS_FILE = "keywords.json"

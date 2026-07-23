@@ -2,13 +2,21 @@ import json
 import logging
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
+from config import (
+    INVENTORY_SOURCE,
+    SHOP_CORE_BASE_URL,
+    SHOP_CORE_TIMEOUT_SECONDS,
+    STATUS_API_PROXY_CORE,
+)
 from storage import state
 
 logger = logging.getLogger(__name__)
 
 
-def build_status_payload() -> dict:
+def build_status_payload_from_state() -> dict:
     snapshot = state.load_snapshot()
     public_products = []
     for product_id, product in sorted(snapshot["products"].items()):
@@ -28,6 +36,31 @@ def build_status_payload() -> dict:
         "updated_at": snapshot["last_scan"],
         "products": public_products,
     }
+
+
+def build_status_payload_from_core() -> dict:
+    if not SHOP_CORE_BASE_URL:
+        raise RuntimeError("SHOP_CORE_BASE_URL 未配置")
+    url = f"{SHOP_CORE_BASE_URL.rstrip('/')}/api/v1/catalog/status"
+    request = Request(url, headers={"Accept": "application/json"})
+    with urlopen(request, timeout=SHOP_CORE_TIMEOUT_SECONDS) as response:
+        payload = json.load(response)
+    if not isinstance(payload, dict) or payload.get("schema_version") != 1:
+        raise RuntimeError("shop-core status 契约不匹配")
+    if not isinstance(payload.get("products"), list):
+        raise RuntimeError("shop-core status 缺少 products")
+    return payload
+
+
+def build_status_payload() -> dict:
+    """Prefer shop-core when inventory is sourced from core; fall back to local state."""
+    use_core = STATUS_API_PROXY_CORE and INVENTORY_SOURCE in {"shop-core", "core"} and bool(SHOP_CORE_BASE_URL)
+    if use_core:
+        try:
+            return build_status_payload_from_core()
+        except (HTTPError, URLError, TimeoutError, RuntimeError, json.JSONDecodeError) as error:
+            logger.warning("proxy status from shop-core failed, fallback to local state: %s", error)
+    return build_status_payload_from_state()
 
 
 def create_status_server(

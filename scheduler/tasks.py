@@ -8,12 +8,14 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from config import (
     CONTENT_CHECK_INTERVAL,
+    INVENTORY_SOURCE,
     NOTIFY_COOLDOWN,
     NOTIFY_EXCLUDE_CATEGORIES,
     SCAN_INTERVAL,
     SHOP_URL,
 )
 from shop import scraper
+from shop.core_client import ShopCoreError, fetch_inventory_products
 from shop.models import Product
 from storage import state
 from storage import content_state
@@ -81,9 +83,15 @@ async def scan_and_notify(first_run: bool = False) -> None:
     静默时段（00:00-09:00）仍然扫描并更新快照、正常做冷却标记，只跳过发送通知，
     确保用户 @查询 时拿到的是最新库存数据，也不会漏发静默时段检测到的事件。
     """
-    logger.info("开始扫描商店库存...")
+    logger.info("开始扫描商店库存... source=%s", INVENTORY_SOURCE)
     try:
-        current_products = await scraper.scan_all(SHOP_URL)
+        if INVENTORY_SOURCE in {"shop-core", "core"}:
+            current_products = await fetch_inventory_products()
+        else:
+            current_products = await scraper.scan_all(SHOP_URL)
+    except ShopCoreError as e:
+        logger.error(f"shop-core 库存读取失败: {e}")
+        return
     except Exception as e:
         logger.error(f"扫描失败: {e}")
         return

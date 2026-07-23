@@ -40,6 +40,10 @@ def test_save_state_persists_stock_count(tmp_path, monkeypatch):
 
 
 def test_build_status_payload_exposes_only_public_fields(monkeypatch):
+    # Force local-state path so this unit test does not call live shop-core.
+    monkeypatch.setattr(server, "STATUS_API_PROXY_CORE", False)
+    monkeypatch.setattr(server, "INVENTORY_SOURCE", "ldxp")
+    monkeypatch.setattr(server, "SHOP_CORE_BASE_URL", "")
     monkeypatch.setattr(
         server.state,
         "load_snapshot",
