@@ -33,6 +33,10 @@ def build_status_payload() -> dict:
 def create_status_server(
     host: str, port: int, allowed_origin: str
 ) -> ThreadingHTTPServer:
+    allowed_origins = frozenset(
+        origin.strip() for origin in allowed_origin.split(",") if origin.strip()
+    )
+
     class StatusHandler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if self.path == "/healthz":
@@ -56,13 +60,16 @@ def create_status_server(
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", cache_control)
             origin = self.headers.get("Origin")
-            if allowed_origin == "*":
+            if "*" in allowed_origins:
                 self.send_header("Access-Control-Allow-Origin", "*")
-            elif origin == allowed_origin:
-                self.send_header("Access-Control-Allow-Origin", allowed_origin)
+            elif origin in allowed_origins:
+                self.send_header("Access-Control-Allow-Origin", origin)
                 self.send_header("Vary", "Origin")
             self.end_headers()
-            self.wfile.write(body)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                logger.debug("status api client disconnected before response completed")
 
         def log_message(self, format: str, *args) -> None:
             logger.debug("status api: " + format, *args)

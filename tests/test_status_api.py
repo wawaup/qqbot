@@ -122,3 +122,31 @@ def test_status_endpoint_returns_json_cache_and_cors_headers(monkeypatch):
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=2)
+
+
+def test_status_endpoint_accepts_each_origin_in_a_comma_separated_allowlist(monkeypatch):
+    monkeypatch.setattr(
+        server,
+        "build_status_payload",
+        lambda: {"schema_version": 1, "updated_at": None, "products": []},
+    )
+    httpd = server.create_status_server(
+        "127.0.0.1",
+        0,
+        "http://127.0.0.1:5173,http://localhost:5173",
+    )
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+    thread.start()
+
+    try:
+        host, port = httpd.server_address
+        request = Request(
+            f"http://{host}:{port}/api/v1/catalog/status",
+            headers={"Origin": "http://localhost:5173"},
+        )
+        with urlopen(request, timeout=2) as response:
+            assert response.headers["Access-Control-Allow-Origin"] == "http://localhost:5173"
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
+        thread.join(timeout=2)
