@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from bot.warranty import analyze_warranty_title_change
+from storage.core_blobs import QQBOT_CONTENT_STATE, get_blob_payload, put_blob_payload
 
 _CONTENT_STATE_FILE = Path("content_state.json")
 
@@ -46,6 +47,15 @@ def build_snapshot(products: dict[str, dict]) -> dict[str, dict]:
 
 
 def load_snapshot() -> dict[str, dict]:
+    remote = get_blob_payload(QQBOT_CONTENT_STATE)
+    if isinstance(remote, dict):
+        # Preferred envelope: {schema_version, checked_at, products}
+        if isinstance(remote.get("products"), dict):
+            return remote["products"]
+        # Bare product map fallback
+        if remote and all(isinstance(v, dict) for v in remote.values()):
+            return remote  # type: ignore[return-value]
+
     if not _CONTENT_STATE_FILE.exists():
         return {}
     try:
@@ -62,6 +72,8 @@ def save_snapshot(products: dict[str, dict]) -> None:
         "checked_at": datetime.now().isoformat(timespec="seconds"),
         "products": products,
     }
+    if put_blob_payload(QQBOT_CONTENT_STATE, data, kind="runtime"):
+        return
     temporary_file = _CONTENT_STATE_FILE.with_name(f".{_CONTENT_STATE_FILE.name}.tmp")
     temporary_file.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),

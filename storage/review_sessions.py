@@ -1,4 +1,7 @@
-"""上新审核会话持久化（单店主串行队列 + 当前会话）。"""
+"""上新审核会话持久化（单店主串行队列 + 当前会话）。
+
+优先 shop-core app_blobs；失败时回退本地 review_sessions.json（勿提交 git）。
+"""
 
 from __future__ import annotations
 
@@ -8,6 +11,8 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from storage.core_blobs import QQBOT_REVIEW_SESSIONS, get_blob_payload, put_blob_payload
 
 _FILE = Path("review_sessions.json")
 _LOCK = threading.Lock()
@@ -23,13 +28,26 @@ def _empty() -> dict[str, Any]:
         "current": None,
         "queue": [],
         "history": [],
-        "last_menu": [],  # [{"index":1,"product_id":"...","title":"..."}]
-        "deferred_ids": [],  # 暂不改，下次清单仍出现
+        "last_menu": [],
+        "deferred_ids": [],
     }
+
+
+def _normalize(data: dict[str, Any]) -> dict[str, Any]:
+    data.setdefault("current", None)
+    data.setdefault("queue", [])
+    data.setdefault("history", [])
+    data.setdefault("last_menu", [])
+    data.setdefault("deferred_ids", [])
+    return data
 
 
 def load() -> dict[str, Any]:
     with _LOCK:
+        remote = get_blob_payload(QQBOT_REVIEW_SESSIONS)
+        if isinstance(remote, dict):
+            return _normalize(dict(remote))
+
         if not _FILE.exists():
             return _empty()
         try:
@@ -38,18 +56,15 @@ def load() -> dict[str, Any]:
             return _empty()
         if not isinstance(data, dict):
             return _empty()
-        data.setdefault("current", None)
-        data.setdefault("queue", [])
-        data.setdefault("history", [])
-        data.setdefault("last_menu", [])
-        data.setdefault("deferred_ids", [])
-        return data
+        return _normalize(data)
 
 
 def save(data: dict[str, Any]) -> None:
     with _LOCK:
         payload = deepcopy(data)
         payload["updated_at"] = _now()
+        if put_blob_payload(QQBOT_REVIEW_SESSIONS, payload, kind="runtime"):
+            return
         _FILE.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",

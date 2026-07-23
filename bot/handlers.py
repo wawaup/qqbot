@@ -110,16 +110,28 @@ _category_commands_cache: dict[str, list[str]] | None = None
 def _load_keywords() -> list[dict]:
     global _keywords_cache
     if _keywords_cache is None:
-        path = Path(KEYWORDS_FILE)
-        _keywords_cache = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
+        from storage.core_blobs import BOT_KEYWORDS, get_blob_payload
+
+        remote = get_blob_payload(BOT_KEYWORDS)
+        if isinstance(remote, list):
+            _keywords_cache = remote
+        else:
+            path = Path(KEYWORDS_FILE)
+            _keywords_cache = json.loads(path.read_text(encoding="utf-8")) if path.exists() else []
     return _keywords_cache
 
 
 def _load_category_commands() -> dict[str, list[dict]]:
     global _category_commands_cache
     if _category_commands_cache is None:
-        path = Path(CATEGORY_COMMANDS_FILE)
-        _category_commands_cache = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        from storage.core_blobs import BOT_CATEGORY_COMMANDS, get_blob_payload
+
+        remote = get_blob_payload(BOT_CATEGORY_COMMANDS)
+        if isinstance(remote, dict):
+            _category_commands_cache = remote
+        else:
+            path = Path(CATEGORY_COMMANDS_FILE)
+            _category_commands_cache = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
     return _category_commands_cache
 
 

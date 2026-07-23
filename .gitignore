@@ -1,10 +1,13 @@
 # 环境配置（含密钥，不上传）
 .env
 
-# 运行时状态快照
+# 运行时状态与运营配置（真相源：shop-core app_blobs）
+# 种子见 config.example/
 state.json
 content_state.json
 review_sessions.json
+keywords.json
+category_commands.json
 data/
 
 # 日志（含轮转文件）

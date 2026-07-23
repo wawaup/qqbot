@@ -1,10 +1,14 @@
 """
 状态持久化：维护上次扫描的商品快照，计算新上架/重新上架/补货商品。
+
+优先写入 shop-core app_blobs；失败或未配置时回退本地 state.json（勿提交 git）。
 """
 import json
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+from storage.core_blobs import QQBOT_INVENTORY_STATE, get_blob_payload, put_blob_payload
 
 if TYPE_CHECKING:
     from shop.models import Product
@@ -12,22 +16,35 @@ if TYPE_CHECKING:
 _STATE_FILE = Path("state.json")
 
 
+def _normalize_products(products: dict) -> dict:
+    if not isinstance(products, dict):
+        return {}
+    for entry in products.values():
+        if not isinstance(entry, dict):
+            continue
+        entry.setdefault("listed", True)
+        entry.setdefault("category_id", None)
+        entry.setdefault("stock_count", 0)
+        entry.setdefault("description_html", "")
+        entry.setdefault("cover_url", "")
+        entry.setdefault("detail_image_urls", [])
+        if not isinstance(entry.get("description"), str):
+            entry["description"] = ""
+    return products
+
+
 def load_snapshot() -> dict:
     """加载完整快照，同时兼容旧版状态文件。"""
+    remote = get_blob_payload(QQBOT_INVENTORY_STATE)
+    if isinstance(remote, dict) and ("products" in remote or "last_scan" in remote):
+        products = _normalize_products(remote.get("products") or {})
+        return {"last_scan": remote.get("last_scan"), "products": products}
+
     if not _STATE_FILE.exists():
         return {"last_scan": None, "products": {}}
     try:
         data = json.loads(_STATE_FILE.read_text(encoding="utf-8"))
-        products = data.get("products", {})
-        for entry in products.values():
-            entry.setdefault("listed", True)  # 兼容旧格式：老数据都是当时在架的商品
-            entry.setdefault("category_id", None)
-            entry.setdefault("stock_count", 0)
-            entry.setdefault("description_html", "")
-            entry.setdefault("cover_url", "")
-            entry.setdefault("detail_image_urls", [])
-            if not isinstance(entry.get("description"), str):
-                entry["description"] = ""  # 兼容曾经的 list[dict] 片段格式
+        products = _normalize_products(data.get("products", {}))
         return {"last_scan": data.get("last_scan"), "products": products}
     except (json.JSONDecodeError, KeyError, TypeError):
         return {"last_scan": None, "products": {}}
@@ -70,12 +87,13 @@ def save_state(products: dict[str, "Product"]) -> None:
         "last_scan": datetime.now().isoformat(timespec="seconds"),
         "products": merged,
     }
-    temporary_file = _STATE_FILE.with_name(f".{_STATE_FILE.name}.tmp")
-    temporary_file.write_text(
-        json.dumps(data, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    temporary_file.replace(_STATE_FILE)
+    if not put_blob_payload(QQBOT_INVENTORY_STATE, data, kind="runtime"):
+        temporary_file = _STATE_FILE.with_name(f".{_STATE_FILE.name}.tmp")
+        temporary_file.write_text(
+            json.dumps(data, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        temporary_file.replace(_STATE_FILE)
 
 
 def diff_states(
