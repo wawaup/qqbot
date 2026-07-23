@@ -169,6 +169,33 @@ async def publish_product(product_id: str, body: dict[str, Any]) -> dict[str, An
     return payload
 
 
+async def record_review_decision(
+    product_id: str,
+    *,
+    status: str,
+    decision: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist human review outcome into shop-core review_queue (DB audit)."""
+    base = _require_core()
+    url = f"{base}/api/internal/review-queue/{product_id}/decision"
+    body = {"status": status, "decision": decision or {}}
+    async with httpx.AsyncClient(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = await client.post(url, headers=_headers(), json=body)
+        if response.status_code >= 400:
+            detail = response.text
+            try:
+                data = response.json()
+                if isinstance(data, dict) and data.get("detail"):
+                    detail = str(data["detail"])
+            except Exception:
+                pass
+            raise ShopCoreError(f"record decision 失败 ({response.status_code}): {detail}")
+        payload = response.json()
+    if not isinstance(payload, dict):
+        raise ShopCoreError("record decision 响应格式错误")
+    return payload
+
+
 async def fetch_inventory_events(*, since: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
     base = _require_core()
     url = f"{base}/api/internal/inventory/events"
@@ -181,3 +208,16 @@ async def fetch_inventory_events(*, since: str | None = None, limit: int = 50) -
         payload = response.json()
     events = payload.get("events") if isinstance(payload, dict) else None
     return events if isinstance(events, list) else []
+
+
+def fetch_catalog_products_sync() -> list[dict[str, Any]]:
+    """Public catalog product rows (includes hidden / not-yet-published)."""
+    if not SHOP_CORE_BASE_URL:
+        raise ShopCoreError("SHOP_CORE_BASE_URL 未配置")
+    url = f"{SHOP_CORE_BASE_URL.rstrip('/')}/api/catalog/products"
+    with httpx.Client(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = client.get(url, headers={"Accept": "application/json"})
+        response.raise_for_status()
+        payload = response.json()
+    products = payload.get("products") if isinstance(payload, dict) else None
+    return products if isinstance(products, list) else []

@@ -138,7 +138,7 @@ qqbot/
 - 实现：`bot/review.py` + `storage/review_sessions.py` + `bot/warranty.py`
 - **两张清单**（互不混排，序号各自从 1 起；最近一次清单用于 `1` / `审核 1`）：
   1. `待审清单` / `审核`：资料变更再审（shop-core review-queue + 已挂 surface 的 catalog 待审）。**不含** hidden 首次上架；文末提示「另有 N 个未上架 → 发 `上架审核`」
-  2. `上架审核` / `待上架`：导航站仍为 **hidden / 未公开** 的商品，走首次上架
+  2. `上架审核` / `待上架`：hidden / 未公开，且仅 **官方订阅充值** + **GPT 付费成品号**（排除接码、Gemini、邮箱、Free/其它分类成品号）
 - 其它指令：`审核 <product_id>` / `审核测试` / `审核状态` / `审核帮助`
 - 审核中回复语义：
   - `可以` / `OK` → **提交草稿并完成**（移出待审）
@@ -148,6 +148,7 @@ qqbot/
   - `取消` → 退出本轮，不标记完成，仍在清单
 - 私聊稿同时展示**原标题 vs 建议标题**；详情 HTML 按来源同步，不经模型改写
 - 确认后优先 `shop-core` publish；失败再回退 navigator overrides（若 `REVIEW_APPLY_ENABLED`）
+- **审计真源**：`POST /api/internal/review-queue/{id}/decision` 写入 DB `review_queue.payload_json`（`last_decision` + 最多 20 条 `decisions` 历史）。本地不再每次新建 pretty JSON；仅 core 不可用时 append `data/review-approved/decisions.jsonl`
 - **成品号质保特例**（`bot/warranty.py` + `content_state.diff_snapshots`）：
   - 标题仅「上架/补货时间」话术变化、质保天数不变 → **不通知**
   - 质保天数缩短（如 30→25）→ **强制通知并置顶**

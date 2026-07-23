@@ -31,9 +31,13 @@ from storage.state import load_state
 logger = logging.getLogger(__name__)
 
 APPROVE_RE = re.compile(
-    r"^(可以|可|行|好|好的|确认|同意|没问题|通过|提交|就这样|就这样吧|ok|okay|yes|y|lgtm)[.!。！\s]*$",
+    r"^(可以|可|行|好|好的|对|对的|对啊|对呀|没错|没问题|正确|是的|是|嗯|嗯嗯|"
+    r"确认|同意|通过|提交|就这样|就这样吧|就是这样|这样可以|可以了|"
+    r"ok|okay|yes|y|lgtm|approve|done)[.!。！\s]*$",
     re.I,
 )
+# 仅在审核进行中：纯「1」=肯定。无会话时「1」走清单选号，不进此规则。
+APPROVE_DIGIT_RE = re.compile(r"^1[.!。！\s]*$")
 # 「不用调整 / 省略这次更改」= 本轮完成：不改展示，标记完成并从待审移除
 SKIP_COMPLETE_RE = re.compile(
     r"^(不用调整|不用改|不改|省略|省略这次|省略本次|跳过|本次不改|这次不改|"
@@ -54,6 +58,11 @@ STATUS_RE = re.compile(r"^(审核状态|当前审核|review\s*status|status)$", 
 HELP_RE = re.compile(r"^(审核帮助|审核说明|review\s*help)$", re.I)
 LIST_RE = re.compile(
     r"^(待审清单|审核清单|待审核|需要审核|审核列表|list\s*review|pending)[.!。！\s]*$",
+    re.I,
+)
+# 首次上架：hidden / 未挂导航 surface 的商品
+PUBLISH_LIST_RE = re.compile(
+    r"^(上架审核|待上架|首次上架|上架清单|待上架清单|新上架|publish\s*list|first\s*publish)[.!。！\s]*$",
     re.I,
 )
 SELECT_RE = re.compile(
@@ -357,7 +366,11 @@ async def generate_draft(
     return draft
 
 
-def classify_owner_reply(text: str) -> str:
+def classify_owner_reply(text: str, *, in_session: bool = False) -> str:
+    """分类店主短句。
+
+    in_session=True 时，纯「1」视为肯定；无会话时「1」留给清单选号，不在此判为 approve。
+    """
     content = (text or "").strip()
     if not content:
         return "empty"
@@ -367,12 +380,17 @@ def classify_owner_reply(text: str) -> str:
         return "defer"
     if SKIP_COMPLETE_RE.match(content):
         return "skip_complete"
+    # 进行中：1 = 肯定；未开审时 1 不走这里，由 SELECT_RE 选商品
+    if in_session and APPROVE_DIGIT_RE.match(content):
+        return "approve"
     if APPROVE_RE.match(content):
         return "approve"
     if STATUS_RE.match(content):
         return "status"
     if HELP_RE.match(content):
         return "help"
+    if PUBLISH_LIST_RE.match(content):
+        return "publish_list"
     if LIST_RE.match(content):
         return "list"
     return "revise"
@@ -462,6 +480,7 @@ def _load_review_queue_items() -> list[dict[str, Any]]:
 
 
 def _load_catalog_pending() -> list[dict[str, Any]]:
+    """已挂 surface 的再审（跳过 hidden，首次上架走 build_publish_menu）。"""
     root = _navigator_root()
     if root is None:
         return []
@@ -497,14 +516,270 @@ def _load_catalog_pending() -> list[dict[str, Any]]:
     return pending
 
 
+# 上架审核白名单：仅官方订阅充值 + GPT 付费成品号
+_PUBLISH_OFFICIAL_CATEGORY_IDS = frozenset(
+    {
+        "gpt-official-recharge",
+        "grok-official-recharge",
+        "cursor",
+        "claude",
+    }
+)
+_PUBLISH_EXCLUDE_TITLE_MARKERS = (
+    "接码",
+    "gemini",
+    "反重力",
+    "antigravity",
+    "whatsapp",
+    "kyc",
+    "教程",
+    "cockpit",
+    "free",
+    "免费",
+    "team 250",
+    "250刀",
+    # Grok 成品/会员号暂不进上架审核（有货再单独放导航）
+    "grok",
+    "supergrok",
+    "x premium",
+)
+# 纯邮箱/基础设施商品（标题含这些且不像 GPT 成品/官方充值）
+_PUBLISH_EMAIL_INFRA_MARKERS = (
+    "oauth",
+    "refresh_token",
+    "imap",
+    "pop3",
+    "定制化",
+    "个人谷歌邮箱",
+    "gmail  ",
+    "outlook",
+)
+_PUBLISH_OFFICIAL_TITLE_MARKERS = (
+    "官方",
+    "代充",
+    "充值",
+    "直充",
+    "卡密",
+    "cdk",
+    "订阅",
+    "年卡",
+    "月卡",
+    "premium",
+    "pro20",
+    "pro 20",
+    "5xpro",
+    "5x pro",
+    "20x",
+)
+_PUBLISH_GPT_PREPARED_TITLE_MARKERS = (
+    "gpt",
+    "chatgpt",
+    "plus",
+    "成品",
+)
+
+
+def _is_unpublished_row(row: dict[str, Any]) -> bool:
+    """hidden 或未对导航可见 → 尚未完成首次上架。
+
+    与库存三态区分：
+    - listed=False → 商城已下架，不上架审核
+    - listed=True 且 stock=0 → 在架无货，仍可待上架
+    - listed=True 且 stock>0 → 在架有货
+    """
+    # 商城下架（从货架消失）≠ 无货；下架不进上架审核
+    if "listed" in row and row.get("listed") is False:
+        return False
+    surface = str(row.get("catalog_surface") or "hidden").strip() or "hidden"
+    visible = bool(row.get("catalog_visible"))
+    status = str(row.get("editorial_status") or "needs_review")
+    if status in {"human_reviewed", "published", "approved", "done", "omitted", "skipped"}:
+        return False
+    if surface == "hidden":
+        return True
+    if not visible:
+        return True
+    return False
+
+
+def _publish_review_bucket(row: dict[str, Any], *, source_category: str = "") -> str | None:
+    """上架审核范围：官方订阅充值 / GPT 付费成品号。其它返回 None。
+
+    明确排除：接码、Gemini、邮箱、Free 成品号、其它分类成品号等。
+    """
+    title = str(row.get("title") or row.get("original_title") or row.get("display_title") or "")
+    category = str(
+        row.get("target_category")
+        or row.get("source_category_name")
+        or source_category
+        or ""
+    )
+    text = f"{title} {category}".lower()
+    target = str(row.get("target_category") or "").strip()
+
+    # 硬排除：接码 / Gemini / Free / 教程等
+    if any(m in text for m in _PUBLISH_EXCLUDE_TITLE_MARKERS):
+        return None
+    if target in {"gemini", "email", "claude"}:
+        # claude 仅允许官方充值类目 id=claude 且标题像充值；成品/接码已排除
+        if target == "gemini" or target == "email":
+            return None
+    # 纯邮箱商品（不是 GPT 成品交付话术）
+    if any(m in text for m in _PUBLISH_EMAIL_INFRA_MARKERS) and not any(
+        m in text for m in ("gpt", "chatgpt", "plus", "cdk", "卡密", "代充")
+    ):
+        return None
+
+    # 1) 官方订阅 / 充值（暂不含 Grok；Grok 在排除词里）
+    if target in _PUBLISH_OFFICIAL_CATEGORY_IDS:
+        if target == "grok-official-recharge":
+            return None
+        return "official"
+    if any(m in text for m in _PUBLISH_OFFICIAL_TITLE_MARKERS) and any(
+        m in text for m in ("gpt", "chatgpt", "cursor", "claude")
+    ):
+        # 标题像官方充值；纯会员成品号（无 CDK/代充）不进官方桶
+        looks_prepared_only = ("成品" in text or "账号" in text or "会员号" in text) and not any(
+            m in text for m in ("cdk", "卡密", "代充", "直充", "充值", "官方")
+        )
+        if not looks_prepared_only:
+            return "official"
+
+    # 2) GPT 付费成品号（排除 free；不含其它品牌成品）
+    if target in {"gpt-ready-account", "gpt-unverified-account"}:
+        if any(m in text for m in ("free", "免费")):
+            return None
+        if "教程" in text:
+            return None
+        return "gpt-prepared"
+    if ("成品" in text or "账号" in text or "月卡" in text) and any(
+        m in text for m in ("gpt", "chatgpt")
+    ):
+        if any(m in text for m in ("free", "免费", "教程")):
+            return None
+        # 必须是 GPT，不能是 Claude/Cursor/Grok 成品
+        if any(m in text for m in ("claude", "cursor")):
+            return None
+        if "grok" in text and "gpt" not in text and "chatgpt" not in text:
+            return None
+        # 官方 CDK 充值优先算 official（上面已覆盖）；这里收 GPT 成品
+        if any(m in text for m in ("cdk", "卡密", "代充", "直充")) and "成品" not in text:
+            return "official"
+        return "gpt-prepared"
+
+    return None
+
+
+def _is_first_publish_row(row: dict[str, Any], *, source_category: str = "") -> bool:
+    """待上架审核：未公开，且属于官方充值 / GPT 成品号白名单。"""
+    if not _is_unpublished_row(row):
+        return False
+    return _publish_review_bucket(row, source_category=source_category) is not None
+
+
+def _load_first_publish_items() -> list[dict[str, Any]]:
+    """待首次上架（白名单）：优先 shop-core catalog products，回退 navigator index。"""
+    state_products = load_state()
+    items: list[dict[str, Any]] = []
+
+    def _source_cat(pid: str) -> str:
+        st = state_products.get(pid) if isinstance(state_products.get(pid), dict) else {}
+        return str(st.get("category") or "")
+
+    try:
+        from shop.core_client import fetch_catalog_products_sync
+
+        for row in fetch_catalog_products_sync():
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("id") or "")
+            if not pid:
+                continue
+            if not _is_first_publish_row(row, source_category=_source_cat(pid)):
+                continue
+            bucket = _publish_review_bucket(row, source_category=_source_cat(pid)) or ""
+            items.append(
+                {
+                    "product_id": pid,
+                    "title": str(row.get("title") or pid),
+                    "price": str(row.get("price") or ""),
+                    "status": str(row.get("editorial_status") or "needs_review"),
+                    "surface": str(row.get("catalog_surface") or "hidden"),
+                    "in_stock": bool(row.get("in_stock")),
+                    "listed": bool(row.get("listed", True)),
+                    "bucket": bucket,
+                    "source": "shop-core-catalog",
+                }
+            )
+        if items:
+            return items
+    except Exception as exc:  # noqa: BLE001
+        logger.info("catalog products for first-publish unavailable: %s", exc)
+
+    root = _navigator_root()
+    if root is None:
+        return []
+    index_path = root / "data" / "catalog" / "index.json"
+    if not index_path.exists():
+        return []
+    try:
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    products = index.get("products") if isinstance(index, dict) else None
+    if not isinstance(products, list):
+        return []
+    for row in products:
+        if not isinstance(row, dict):
+            continue
+        pid = str(row.get("id") or "")
+        if not pid:
+            continue
+        # navigator 行字段略有差异
+        normalized = {
+            "id": pid,
+            "title": row.get("title"),
+            "price": row.get("price"),
+            "catalog_surface": row.get("catalog_surface") or "hidden",
+            "catalog_visible": row.get("catalog_visible", False),
+            "editorial_status": row.get("editorial_status") or row.get("status"),
+            "target_category": row.get("target_category"),
+            "in_stock": row.get("in_stock"),
+            "listed": row.get("listed", True),
+        }
+        if not _is_first_publish_row(normalized, source_category=_source_cat(pid)):
+            continue
+        bucket = _publish_review_bucket(normalized, source_category=_source_cat(pid)) or ""
+        items.append(
+            {
+                "product_id": pid,
+                "title": str(normalized.get("title") or pid),
+                "price": str(normalized.get("price") or ""),
+                "status": str(normalized.get("editorial_status") or "needs_review"),
+                "surface": str(normalized.get("catalog_surface") or "hidden"),
+                "in_stock": bool(normalized.get("in_stock")),
+                "listed": bool(normalized.get("listed", True)),
+                "bucket": bucket,
+                "source": "catalog-index-hidden",
+            }
+        )
+    return items
+
+
+def count_first_publish_pending() -> int:
+    return len(_load_first_publish_items())
+
+
 def build_pending_menu() -> list[dict[str, Any]]:
-    """合并 review-queue + catalog 待审，编号后缓存到 last_menu。"""
+    """资料变更 / 再审清单（不含 hidden 首次上架）。编号后缓存到 last_menu。"""
     state_products = load_state()
     by_id: dict[str, dict[str, Any]] = {}
+    # hidden / 未公开 → 只走「上架审核」，避免两张清单重复
+    first_publish_ids = {i["product_id"] for i in _load_first_publish_items()}
 
     for item in _load_review_queue_items():
         pid = item["product_id"]
-        if not pid:
+        if not pid or pid in first_publish_ids:
             continue
         st = state_products.get(pid) if isinstance(state_products.get(pid), dict) else {}
         by_id[pid] = {
@@ -516,11 +791,12 @@ def build_pending_menu() -> list[dict[str, Any]]:
             "detected_at": item.get("detected_at") or "",
             "source": item.get("source") or "review-queue",
             "priority": 0 if "title" in (item.get("changed_fields") or []) else 1,
+            "kind": "change",
         }
 
     for item in _load_catalog_pending():
         pid = item["product_id"]
-        if not pid:
+        if not pid or pid in first_publish_ids:
             continue
         if pid in by_id:
             continue
@@ -534,6 +810,7 @@ def build_pending_menu() -> list[dict[str, Any]]:
             "detected_at": "",
             "source": "catalog-index",
             "priority": 2,
+            "kind": "change",
         }
 
     deferred = review_sessions.get_deferred_ids()
@@ -559,48 +836,166 @@ def build_pending_menu() -> list[dict[str, Any]]:
                 "changed_fields": row.get("changed_fields") or [],
                 "deferred": row["product_id"] in deferred,
                 "source": row.get("source") or "",
+                "kind": "change",
             }
         )
     review_sessions.set_last_menu(menu)
     return menu
 
 
-def format_pending_menu(menu: list[dict[str, Any]] | None = None) -> str:
-    items = menu if menu is not None else build_pending_menu()
-    if not items:
-        return (
-            "当前没有待审核商品。\n"
-            "也可直接 `审核 商品id` 或 `审核测试` 手动开审。"
+def build_publish_menu() -> list[dict[str, Any]]:
+    """首次上架清单：hidden / 未公开商品。"""
+    state_products = load_state()
+    deferred = review_sessions.get_deferred_ids()
+    rows: list[dict[str, Any]] = []
+    for item in _load_first_publish_items():
+        pid = item["product_id"]
+        st = state_products.get(pid) if isinstance(state_products.get(pid), dict) else {}
+        price = str(item.get("price") or st.get("price") or "")
+        in_stock = item.get("in_stock")
+        if in_stock is None and isinstance(st, dict):
+            in_stock = bool(st.get("in_stock"))
+        bucket = str(item.get("bucket") or "")
+        bucket_label = {
+            "official": "官方充值",
+            "gpt-prepared": "GPT成品号",
+        }.get(bucket, "首次上架")
+        rows.append(
+            {
+                "product_id": pid,
+                "title": str(item.get("title") or st.get("title") or pid),
+                "price": price,
+                "status": item.get("status") or "needs_review",
+                "surface": item.get("surface") or "hidden",
+                "in_stock": bool(in_stock),
+                "listed": bool(item.get("listed", True)),
+                "source": item.get("source") or "first-publish",
+                "deferred": pid in deferred,
+                "bucket": bucket,
+                "bucket_label": bucket_label,
+            }
         )
-    lines = [
-        f"# 待审核商品（共 {len(items)}）",
-        "回复序号开始审核，例如 `1` 或 `审核 1`。",
-        "审核中：`可以`=提交　`不用调整/省略`=完成且不改　`暂不改`=仍留清单　`取消`=退出本轮",
-        "",
-    ]
-    # QQ 消息长度有限，最多列 30 条
-    for item in items[:30]:
+    # 官方充值优先，其次 GPT 成品；有货优先，暂缓靠后
+    rows.sort(
+        key=lambda r: (
+            1 if r.get("deferred") else 0,
+            0 if r.get("bucket") == "official" else 1,
+            0 if r.get("in_stock") else 1,
+            0 if r.get("listed") else 1,
+            r["product_id"],
+        )
+    )
+    menu: list[dict[str, Any]] = []
+    for index, row in enumerate(rows, start=1):
+        menu.append(
+            {
+                "index": index,
+                "product_id": row["product_id"],
+                "title": row["title"],
+                "price": row.get("price") or "",
+                "status": row.get("status") or "",
+                "changed_fields": [row.get("bucket_label") or "首次上架"],
+                "deferred": bool(row.get("deferred")),
+                "source": row.get("source") or "",
+                "kind": "publish",
+                "in_stock": bool(row.get("in_stock")),
+                "listed": bool(row.get("listed", True)),
+                "surface": row.get("surface") or "hidden",
+                "bucket": row.get("bucket") or "",
+            }
+        )
+    review_sessions.set_last_menu(menu)
+    return menu
+
+
+def _format_menu_lines(items: list[dict[str, Any]], *, limit: int = 30) -> list[str]:
+    lines: list[str] = []
+    for item in items[:limit]:
         mark = "⏸" if item.get("deferred") else "•"
         price = _format_price(item.get("price"))
         price_bit = f" {price}r" if price else ""
         fields = item.get("changed_fields") or []
-        field_bit = f" 〔{'/'.join(fields)}〕" if fields else ""
+        field_bit = f" 〔{'/'.join(str(f) for f in fields)}〕" if fields else ""
+        stock_bit = ""
+        if item.get("kind") == "publish":
+            if item.get("listed") is False:
+                stock_bit = " 🚫已下架"
+            elif item.get("in_stock"):
+                stock_bit = " ✅有货"
+            else:
+                stock_bit = " ⛔在架无货"
         title = item.get("title") or item.get("product_id")
         if len(title) > 40:
             title = title[:38] + "…"
         lines.append(
-            f"{item['index']}. {mark} `{item['product_id']}`{price_bit} {title}{field_bit}"
+            f"{item['index']}. {mark} `{item['product_id']}`{price_bit}{stock_bit} {title}{field_bit}"
         )
-    if len(items) > 30:
-        lines.append(f"\n…另有 {len(items) - 30} 个未列出，可 `审核 商品id` 直接开审。")
+    if len(items) > limit:
+        lines.append(f"\n…另有 {len(items) - limit} 个未列出，可 `审核 商品id` 直接开审。")
+    return lines
+
+
+def format_pending_menu(menu: list[dict[str, Any]] | None = None) -> str:
+    items = menu if menu is not None else build_pending_menu()
+    first_n = count_first_publish_pending()
+    if not items:
+        lines = [
+            "当前没有「资料变更」类待审商品。",
+            "也可直接 `审核 商品id` 或 `审核测试` 手动开审。",
+        ]
+        if first_n:
+            lines.append(
+                f"\n🆕 另有 **{first_n}** 个**官方充值/GPT成品号**待上架，"
+                f"发 `上架审核` 查看。"
+            )
+        else:
+            lines.append("\n暂无官方充值/GPT成品号类的待上架商品。")
+        return "\n".join(lines)
+
+    lines = [
+        f"# 待审核商品（资料变更，共 {len(items)}）",
+        "回复序号开始审核，例如 `1` 或 `审核 1`。",
+        "审核中：`可以`=提交　`不用调整/省略`=完成且不改　`暂不改`=仍留清单　`取消`=退出本轮",
+        "",
+    ]
+    lines.extend(_format_menu_lines(items))
     deferred_n = sum(1 for i in items if i.get("deferred"))
     if deferred_n:
         lines.append(f"\n⏸ = 你标过「暂不改」的 {deferred_n} 个，仍在清单中。")
+    if first_n:
+        lines.append(
+            f"\n🆕 另有 **{first_n}** 个**官方充值/GPT成品号**待上架 → 发 `上架审核`"
+        )
+    else:
+        lines.append("\n🆕 当前没有官方充值/GPT成品号类的待上架（也可发 `上架审核` 复查）。")
+    return "\n".join(lines)
+
+
+def format_publish_menu(menu: list[dict[str, Any]] | None = None) -> str:
+    items = menu if menu is not None else build_publish_menu()
+    if not items:
+        return (
+            "当前没有待首次上架的 hidden 商品。\n"
+            "发 `待审清单` 可看资料变更类审核。"
+        )
+    lines = [
+        f"# 上架审核（首次上架，共 {len(items)}）",
+        "范围：**官方订阅/充值** + **GPT 付费成品号**（hidden / 未公开）。",
+        "不含：商城已下架、接码、Gemini、Grok、邮箱、Free 成品号、其它分类成品号。",
+        "回复序号开始，例如 `1` 或 `审核 1`。",
+        "审核中：`可以`=提交上架　`不用调整/省略`=完成且不上架配置　`暂不改`=仍留清单　`取消`=退出",
+        "",
+    ]
+    lines.extend(_format_menu_lines(items))
+    deferred_n = sum(1 for i in items if i.get("deferred"))
+    if deferred_n:
+        lines.append(f"\n⏸ = 暂不改 {deferred_n} 个。")
+    lines.append("\n资料变更再审请发 `待审清单`。")
     return "\n".join(lines)
 
 
 def resolve_menu_selection(text: str) -> str | None:
-    """从序号解析 product_id；无效返回 None。"""
+    """从序号解析 product_id；无效返回 None。使用最近一次展示的清单（待审或上架）。"""
     content = (text or "").strip()
     match = SELECT_RE.match(content)
     if not match:
@@ -765,16 +1160,18 @@ def format_review_message(session: dict[str, Any]) -> str:
 def format_help() -> str:
     return (
         "## 上新审核用法\n"
-        "1. `待审清单`：列出待审商品（带序号）\n"
-        "2. 回复 `1` / `审核 1`：进入该商品审核\n"
-        "3. 或 `审核 g28zpj` / `审核测试` 直接开审\n"
-        "4. `审核状态`：当前会话\n"
+        "1. `待审清单`：资料变更类待审（末尾提示是否有未上架新品）\n"
+        "2. `上架审核`：**hidden / 未公开** 商品的首次上架清单\n"
+        "3. **未开审**时回复 `1` / `审核 1`：进入最近清单第 N 项\n"
+        "4. 或 `审核 g28zpj` / `审核测试` 直接开审\n"
+        "5. `审核状态`：当前会话\n"
         "\n"
         "审核中：\n"
-        "- `可以`：提交草稿并完成\n"
+        "- `1` / `可以` / `对的`：肯定当前步骤并继续\n"
         "- `不用调整` / `省略`：完成且不改，移出待审\n"
         "- `暂不改`：仍留清单，下次再改\n"
         "- 修改意见：重拟后再确认\n"
+        "- 换审其它序号：先 `取消`，再发数字\n"
         "\n"
         "规则：标题/步骤需确认；详情按来源同步；仅 OWNER 可触发。\n"
         "特例：成品号质保天数缩短会强制通知；仅上架时间话术变化可忽略。"
@@ -799,8 +1196,132 @@ def format_status(session: dict[str, Any] | None) -> str:
     )
 
 
-def _mark_queue_status(product_id: str, status: str, **extra: Any) -> list[str]:
-    """更新 navigator review-queue 状态；返回改动的路径。"""
+def _compact_decision_payload(
+    session: dict[str, Any] | None,
+    *,
+    status: str,
+    note: str = "",
+    publish_body: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build a compact audit decision for shop-core (avoid huge HTML dumps)."""
+    product = (session or {}).get("product") if isinstance(session, dict) else {}
+    draft = (session or {}).get("draft") if isinstance(session, dict) else {}
+    if not isinstance(product, dict):
+        product = {}
+    if not isinstance(draft, dict):
+        draft = {}
+    usage = draft.get("usage") if isinstance(draft.get("usage"), dict) else {}
+    steps = usage.get("steps") if isinstance(usage.get("steps"), list) else []
+    decision: dict[str, Any] = {
+        "status": status,
+        "decided_at": _now(),
+        "actor": "qqbot-c2c-review",
+        "session_id": (session or {}).get("id") if isinstance(session, dict) else None,
+        "source": (session or {}).get("source") if isinstance(session, dict) else None,
+        "round": (session or {}).get("round") if isinstance(session, dict) else None,
+        "product_id": product.get("id"),
+        "original_title": product.get("title"),
+        "final_title": (
+            effective_title(session)
+            if isinstance(session, dict) and session.get("product")
+            else (extra or {}).get("final_title")
+        ),
+        "surface": draft.get("surface"),
+        "target_category": draft.get("target_category"),
+        "fulfillment_mode": draft.get("fulfillment_mode"),
+        "short_title": draft.get("short_title"),
+        "usage_step_count": len(steps),
+        "force_original_title": bool((session or {}).get("force_original_title"))
+        if isinstance(session, dict)
+        else False,
+        "note": note,
+    }
+    if publish_body:
+        # Keep a trimmed copy for audit without description_html blobs.
+        decision["publish_body"] = {
+            k: publish_body.get(k)
+            for k in (
+                "display_title",
+                "catalog_surface",
+                "catalog_visible",
+                "target_category",
+                "fulfillment_mode",
+                "short_title",
+                "membership_placement",
+                "prepared_placement",
+                "resolve_review",
+                "generated_by",
+            )
+            if k in publish_body
+        }
+    if extra:
+        for key, value in extra.items():
+            if key not in decision or decision.get(key) in (None, ""):
+                decision[key] = value
+    return decision
+
+
+def _write_local_audit_fallback(decision: dict[str, Any]) -> str | None:
+    """Append-only local fallback when shop-core is unavailable (debug only)."""
+    try:
+        path = Path("data/review-approved/decisions.jsonl")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(decision, ensure_ascii=False, separators=(",", ":")) + "\n")
+        return str(path)
+    except OSError as exc:
+        logger.warning("local audit fallback failed: %s", exc)
+        return None
+
+
+async def _record_decision(
+    product_id: str,
+    *,
+    status: str,
+    session: dict[str, Any] | None = None,
+    note: str = "",
+    publish_body: dict[str, Any] | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Primary: shop-core review_queue decision. Fallback: local jsonl + navigator file."""
+    decision = _compact_decision_payload(
+        session,
+        status=status,
+        note=note,
+        publish_body=publish_body,
+        extra=extra,
+    )
+    result: dict[str, Any] = {
+        "product_id": product_id,
+        "status": status,
+        "mode": "none",
+        "paths": [],
+        "core": None,
+    }
+    try:
+        from shop.core_client import record_review_decision
+
+        core = await record_review_decision(product_id, status=status, decision=decision)
+        result["core"] = core
+        result["mode"] = "shop-core-review-queue"
+        return result
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("core review decision failed, fallback local: %s", exc)
+        result["warning"] = str(exc)
+
+    local_path = _write_local_audit_fallback(decision)
+    if local_path:
+        result["paths"].append(local_path)
+        result["mode"] = "local-jsonl-fallback"
+
+    # legacy navigator review-queue file if present
+    result["paths"].extend(_mark_navigator_queue_status(product_id, status, **(extra or {})))
+    return result
+
+
+def _mark_navigator_queue_status(product_id: str, status: str, **extra: Any) -> list[str]:
+    """Legacy: update navigator review-queue JSON if the file tree still exists."""
     paths: list[str] = []
     root = _navigator_root()
     if root is None:
@@ -821,6 +1342,11 @@ def _mark_queue_status(product_id: str, status: str, **extra: Any) -> list[str]:
     queue_path.write_text(json.dumps(queue, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     paths.append(str(queue_path))
     return paths
+
+
+def _mark_queue_status(product_id: str, status: str, **extra: Any) -> list[str]:
+    """Backward-compatible sync helper (navigator only). Prefer _record_decision."""
+    return _mark_navigator_queue_status(product_id, status, **extra)
 
 
 def _initial_step(draft: dict[str, Any]) -> str:
@@ -997,7 +1523,7 @@ async def start_test_review() -> tuple[dict[str, Any], str]:
 
 
 async def _publish_to_core(session: dict[str, Any]) -> dict[str, Any]:
-    """Primary apply path: shop-core atomic publish + local audit snapshot."""
+    """Primary apply path: shop-core atomic publish; audit goes to DB."""
     product = session["product"]
     product_id = product["id"]
     final_title = effective_title(session)
@@ -1009,30 +1535,24 @@ async def _publish_to_core(session: dict[str, Any]) -> dict[str, Any]:
         "paths": [],
         "mode": "dry-run",
         "core": None,
+        "audit": None,
     }
 
-    approved_dir = Path("data/review-approved")
-    approved_dir.mkdir(parents=True, exist_ok=True)
     try:
         publish_body = build_publish_body(session)
     except ValueError as exc:
         result["mode"] = "blocked"
         result["warning"] = str(exc)
+        audit = await _record_decision(
+            product_id,
+            status="blocked",
+            session=session,
+            note=str(exc),
+            extra={"final_title": final_title},
+        )
+        result["audit"] = audit
+        result["paths"].extend(audit.get("paths") or [])
         return result
-
-    snapshot = {
-        "approved_at": _now(),
-        "session_id": session.get("id"),
-        "product_id": product_id,
-        "original_title": product["title"],
-        "final_title": final_title,
-        "surface": draft.get("surface"),
-        "publish_body": publish_body,
-        "note": "详情 HTML 由 core inventory 维护；本快照仅审计上架决策",
-    }
-    snap_path = approved_dir / f"{product_id}-{session.get('id')}.json"
-    snap_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    result["paths"].append(str(snap_path))
 
     try:
         from shop.core_client import publish_product
@@ -1041,22 +1561,55 @@ async def _publish_to_core(session: dict[str, Any]) -> dict[str, Any]:
         result["core"] = core_result
         result["applied"] = True
         result["mode"] = "shop-core-publish"
-        _mark_queue_status(product_id, "published_via_qqbot", final_title=final_title)
+        # Enrich review_queue with C2C session details (publish already sets status=published).
+        audit = await _record_decision(
+            product_id,
+            status="published",
+            session=session,
+            note="qqbot c2c publish ok",
+            publish_body=publish_body,
+            extra={
+                "final_title": final_title,
+                "published_surface": draft.get("surface"),
+                "core_review_status": (core_result or {}).get("review_status"),
+            },
+        )
+        result["audit"] = audit
+        result["paths"].extend(audit.get("paths") or [])
         return result
     except Exception as exc:  # noqa: BLE001
         logger.warning("core publish failed, fallback navigator override: %s", exc)
         result["warning"] = f"core 发布失败：{exc}"
-        # fall through to legacy navigator write if enabled
 
     if not REVIEW_APPLY_ENABLED:
-        result["mode"] = "snapshot-only"
+        audit = await _record_decision(
+            product_id,
+            status="blocked",
+            session=session,
+            note=f"core publish failed and apply disabled: {result.get('warning')}",
+            publish_body=publish_body,
+            extra={"final_title": final_title},
+        )
+        result["audit"] = audit
+        result["paths"].extend(audit.get("paths") or [])
+        result["mode"] = "audit-only"
         return result
 
-    # Legacy filesystem apply (audit / offline)
+    # Legacy filesystem apply (offline) + still try DB audit
     legacy = _apply_to_navigator(session)
     result["paths"].extend(legacy.get("paths") or [])
     result["applied"] = bool(legacy.get("applied"))
     result["mode"] = f"fallback:{legacy.get('mode')}"
+    audit = await _record_decision(
+        product_id,
+        status="published_via_qqbot" if result["applied"] else "blocked",
+        session=session,
+        note=f"fallback navigator apply; core failed: {result.get('warning')}",
+        publish_body=publish_body,
+        extra={"final_title": final_title},
+    )
+    result["audit"] = audit
+    result["paths"].extend(audit.get("paths") or [])
     return result
 
 
@@ -1077,32 +1630,16 @@ def _apply_to_navigator(session: dict[str, Any]) -> dict[str, Any]:
         "mode": "dry-run",
     }
 
-    approved_dir = Path("data/review-approved")
-    approved_dir.mkdir(parents=True, exist_ok=True)
-    snapshot = {
-        "approved_at": _now(),
-        "session_id": session.get("id"),
-        "product_id": product_id,
-        "original_title": product["title"],
-        "final_title": final_title,
-        "surface": surface,
-        "usage": usage,
-        "source_description_excerpt": (product.get("description") or "")[:2000],
-        "description_html_synced": True,
-        "note": "详情按来源同步，不经模型改写",
-    }
-    snap_path = approved_dir / f"{product_id}-{session.get('id')}.json"
-    snap_path.write_text(json.dumps(snapshot, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    result["paths"].append(str(snap_path))
+    # 审计真源在 shop-core；此处不再为每次审核新建 JSON 快照文件。
 
     if not REVIEW_APPLY_ENABLED:
-        result["mode"] = "snapshot-only"
+        result["mode"] = "apply-disabled"
         return result
 
     root = NAVIGATOR_ROOT
     if not root or not Path(root).is_dir():
-        result["mode"] = "snapshot-only"
-        result["warning"] = "NAVIGATOR_ROOT 不可用，仅保存本地快照"
+        result["mode"] = "no-navigator"
+        result["warning"] = "NAVIGATOR_ROOT 不可用，无法写 legacy overrides"
         return result
 
     root = Path(root)
@@ -1322,7 +1859,7 @@ def _advance_step_after_approve(session: dict[str, Any]) -> str | None:
 
 async def handle_confirmation(session: dict[str, Any], owner_text: str) -> tuple[str, dict[str, Any] | None]:
     """处理店主对当前审核的回复。返回 (reply_text, new_current_session_or_none)。"""
-    intent = classify_owner_reply(owner_text)
+    intent = classify_owner_reply(owner_text, in_session=True)
     product_id = session["product"]["id"]
     content = (owner_text or "").strip()
     step = session.get("step") or STEP_COPY
@@ -1379,21 +1916,24 @@ async def handle_confirmation(session: dict[str, Any], owner_text: str) -> tuple
 
         session["status"] = "skipped_complete"
         session["final_title"] = session["product"]["title"]
+        session["force_original_title"] = True
         session["updated_at"] = _now()
-        paths = _mark_queue_status(
+        audit = await _record_decision(
             product_id,
-            "omitted_via_qqbot",
-            final_title=session["product"]["title"],
+            status="omitted",
+            session=session,
             note="店主选择不用调整/省略，本轮完成且未改展示",
+            extra={"final_title": session["product"]["title"]},
         )
         review_sessions.clear_deferred(product_id)
         review_sessions.clear_current(archive=True)
         lines = [
             f"已**省略更改并完成** `{product_id}`。",
             "- 标题/步骤：保持原样，未写入新草稿",
-            "- 已从待审队列移除（下次清单不再出现，除非资料再次变化）",
+            "- 审计已写入 shop-core review_queue（失败则本地 jsonl 兜底）",
+            f"- 记录模式：{audit.get('mode')}",
         ]
-        for path in paths[:3]:
+        for path in (audit.get("paths") or [])[:3]:
             lines.append(f"  - `{path}`")
         return await _advance_or_idle(lines)
 
@@ -1435,15 +1975,17 @@ async def handle_confirmation(session: dict[str, Any], owner_text: str) -> tuple
         review_sessions.clear_current(archive=True)
         surface = (session.get("draft") or {}).get("surface")
         route = "/" if surface == OFFICIAL_SURFACE else "/accounts" if surface == PREPARED_SURFACE else ""
+        audit = apply_result.get("audit") or {}
         lines = [
             f"已确认并**上架** `{product_id}`。",
             f"- 最终标题：{session['final_title']}",
             f"- 写入模式：{apply_result.get('mode')}",
+            f"- 审计：{audit.get('mode') or 'shop-core-review-queue'}",
         ]
         if route:
             lines.append(f"- 导航：{route}")
         if apply_result.get("paths"):
-            lines.append("- 审计快照：")
+            lines.append("- 兜底路径：")
             for path in apply_result["paths"][:4]:
                 lines.append(f"  - `{path}`")
         if apply_result.get("warning"):
@@ -1499,6 +2041,9 @@ async def handle_owner_text(text: str) -> str:
     if HELP_RE.match(content) or content in {"审核帮助"}:
         return format_help()
 
+    if PUBLISH_LIST_RE.match(content):
+        return format_publish_menu()
+
     if LIST_RE.match(content) or content in {"审核", "上新审核", "review"}:
         return format_pending_menu()
 
@@ -1520,12 +2065,13 @@ async def handle_owner_text(text: str) -> str:
             return format_help()
         return await _start_review_safe(pid, source="c2c")
 
-    # 进行中会话：确认/修改优先；纯数字提示先结束本轮
+    # 进行中会话：1 / 可以 / 对的 = 肯定推进；其它序号需先取消再选清单
     if in_session:
-        if re.fullmatch(r"\d{1,3}", content):
+        if re.fullmatch(r"\d{1,3}", content) and not APPROVE_DIGIT_RE.match(content):
             return (
                 f"当前正在审 `{current['product']['id']}`。\n"
-                f"若要改审清单第 {content} 项，请先 `取消` 或 `暂不改`，再发序号。\n"
+                f"- 发 `1` / `可以` / `对的`：肯定当前步骤\n"
+                f"- 若要改审清单第 {content} 项：先 `取消` 或 `暂不改`，再发序号\n"
                 "若这是修改意见，请写成完整句子。"
             )
         try:
@@ -1535,7 +2081,7 @@ async def handle_owner_text(text: str) -> str:
             logger.exception("handle confirmation failed")
             return f"处理确认时出错：{exc}"
 
-    # 无会话：按序号开审
+    # 无会话：按序号开审（此时 1 = 清单第 1 项，不是肯定）
     if SELECT_RE.match(content):
         if not review_sessions.get_last_menu():
             build_pending_menu()
@@ -1544,12 +2090,12 @@ async def handle_owner_text(text: str) -> str:
             menu = review_sessions.get_last_menu()
             if not menu:
                 return "当前没有待审商品。可 `审核 商品id` 手动开审。"
-            return f"序号超出范围（1–{len(menu)}）。请重新发 `待审清单`。"
+            return f"序号超出范围（1–{len(menu)}）。请重新发 `待审清单` 或 `上架审核`。"
         return await _start_review_safe(selected_id, source="menu")
 
-    intent = classify_owner_reply(content)
+    intent = classify_owner_reply(content, in_session=False)
     if intent in {"approve", "skip_complete", "defer", "cancel"}:
-        return "当前没有进行中的审核。发送 `待审清单` 查看并选号。"
+        return "当前没有进行中的审核。发送 `待审清单` / `上架审核` 查看并选号。"
 
     return ""
 

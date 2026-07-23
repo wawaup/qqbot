@@ -10,6 +10,15 @@ from storage import review_sessions
 def test_classify_owner_reply():
     assert review.classify_owner_reply("可以") == "approve"
     assert review.classify_owner_reply("OK") == "approve"
+    assert review.classify_owner_reply("对的") == "approve"
+    assert review.classify_owner_reply("对") == "approve"
+    assert review.classify_owner_reply("没错") == "approve"
+    assert review.classify_owner_reply("是的") == "approve"
+    assert review.classify_owner_reply("就是这样") == "approve"
+    # 纯「1」：仅审核进行中算肯定；选清单时不算
+    assert review.classify_owner_reply("1", in_session=True) == "approve"
+    assert review.classify_owner_reply("1", in_session=False) != "approve"
+    assert review.classify_owner_reply("2", in_session=True) != "approve"
     assert review.classify_owner_reply("不用调整") == "skip_complete"
     assert review.classify_owner_reply("省略") == "skip_complete"
     assert review.classify_owner_reply("暂不改") == "defer"
@@ -17,6 +26,67 @@ def test_classify_owner_reply():
     assert review.classify_owner_reply("标题改成更短一点，去掉渠道字样") == "revise"
     assert review.classify_owner_reply("审核状态") == "status"
     assert review.classify_owner_reply("待审清单") == "list"
+
+
+@pytest.mark.asyncio
+async def test_digit_one_approves_in_session_selects_out_of_session(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(review_sessions, "_FILE", Path("review_sessions.json"))
+    monkeypatch.setattr(review, "NAVIGATOR_ROOT", tmp_path / "nav")
+    monkeypatch.setattr(review, "_load_first_publish_items", lambda: [])
+
+    # 无会话：1 → 选清单第一项（mock start）
+    menu = [
+        {
+            "index": 1,
+            "product_id": "ejggbt",
+            "title": "GPT Plus CDK",
+            "price": "129",
+            "status": "pending",
+            "changed_fields": [],
+            "deferred": False,
+            "source": "test",
+            "kind": "publish",
+        }
+    ]
+    review_sessions.set_last_menu(menu)
+    review_sessions.set_current(None)
+
+    started: list[str] = []
+
+    async def _fake_start(pid: str, *, source: str = "manual"):
+        started.append(pid)
+        return f"started:{pid}"
+
+    monkeypatch.setattr(review, "_start_review_safe", _fake_start)
+    out = await review.handle_owner_text("1")
+    assert out == "started:ejggbt"
+    assert started == ["ejggbt"]
+
+    # 有会话：1 → 肯定推进，不重新 start
+    session = {
+        "id": "s1",
+        "status": "awaiting_confirmation",
+        "step": review.STEP_SURFACE,
+        "product": {"id": "ejggbt", "title": "原标题", "price": "129", "url": "u"},
+        "draft": {
+            "proposed_title": "建议",
+            "surface": "official-membership",
+            "usage": {"steps": []},
+            "issues": [],
+            "membership_guess": {},
+            "prepared_guess": {},
+        },
+        "round": 1,
+    }
+    review_sessions.set_current(session)
+    started.clear()
+    out2 = await review.handle_owner_text("1")
+    assert started == []
+    assert "ejggbt" in out2 or "官方" in out2 or "类目" in out2 or "步骤" in out2 or "标题" in out2
+    cur = review_sessions.get_current()
+    assert cur is not None
+    assert cur.get("step") == review.STEP_OFFICIAL
 
 
 def test_normalize_draft_defaults():
@@ -143,12 +213,204 @@ def test_pending_menu_prefers_shop_core_queue(tmp_path, monkeypatch):
         ]
 
     monkeypatch.setattr("shop.core_client.fetch_review_queue_sync", _fake_core)
+    # 无 hidden 首次上架，避免 pending 被 first_publish 过滤
+    monkeypatch.setattr(review, "_load_first_publish_items", lambda: [])
     menu = review.build_pending_menu()
     assert len(menu) == 1
     assert menu[0]["product_id"] == "87x586"
     assert menu[0]["source"] == "shop-core"
     assert menu[0]["title"].startswith("Grok Super")
     assert "description" in menu[0]["changed_fields"]
+
+
+def test_publish_menu_lists_hidden_and_pending_footer(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(review_sessions, "_FILE", Path("review_sessions.json"))
+    monkeypatch.setattr(review, "NAVIGATOR_ROOT", tmp_path / "nav")
+    monkeypatch.setattr(
+        review,
+        "load_state",
+        lambda: {
+            "ejggbt": {"title": "GPT Plus 谷歌 CDK", "price": "129.00", "in_stock": True},
+            "87x586": {"title": "已上架再审", "price": "139.00"},
+        },
+    )
+    monkeypatch.setattr(
+        review,
+        "_load_first_publish_items",
+        lambda: [
+            {
+                "product_id": "ejggbt",
+                "title": "GPT Plus [谷歌] CDK 自动充值 质保30天",
+                "price": "129.00",
+                "status": "needs_review",
+                "surface": "hidden",
+                "in_stock": True,
+                "listed": True,
+                "bucket": "official",
+                "source": "shop-core-catalog",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "shop.core_client.fetch_review_queue_sync",
+        lambda **_k: [
+            {
+                "product_id": "87x586",
+                "status": "pending_manual_enrichment",
+                "title": "Grok Super直充卡密（两个月）",
+                "payload": {"changed_fields": ["description"]},
+            },
+            {
+                # hidden 虽在 review-queue，也应只出现在上架审核
+                "product_id": "ejggbt",
+                "status": "pending_manual_enrichment",
+                "title": "GPT Plus [谷歌] CDK",
+                "payload": {"changed_fields": ["description"]},
+            },
+        ],
+    )
+
+    publish_menu = review.build_publish_menu()
+    assert [m["product_id"] for m in publish_menu] == ["ejggbt"]
+    assert publish_menu[0]["kind"] == "publish"
+    text = review.format_publish_menu(publish_menu)
+    assert "上架审核" in text and "ejggbt" in text
+    assert "接码" in text  # 文案说明不含接码
+
+    change_menu = review.build_pending_menu()
+    assert [m["product_id"] for m in change_menu] == ["87x586"]
+    footer = review.format_pending_menu(change_menu)
+    assert "上架审核" in footer
+    assert "1" in footer  # 提示有 1 个未上架
+    assert review.classify_owner_reply("上架审核") == "publish_list"
+
+
+def test_publish_review_bucket_whitelist():
+    # 官方充值
+    assert (
+        review._publish_review_bucket(
+            {
+                "title": "GPT Plus [谷歌] CDK 自动充值 质保30天",
+                "target_category": "gpt-official-recharge",
+            }
+        )
+        == "official"
+    )
+    assert (
+        review._publish_review_bucket(
+            {"title": "GPT 5xPro [谷歌] CDK 自动充值 质保30天", "target_category": "other"}
+        )
+        == "official"
+    )
+    # GPT 付费成品
+    assert (
+        review._publish_review_bucket(
+            {
+                "title": "稳越南人搓的upi渠道 gptplus会员独享月卡成品质保首登",
+                "target_category": "gpt-unverified-account",
+            }
+        )
+        == "gpt-prepared"
+    )
+    # 排除
+    assert (
+        review._publish_review_bucket(
+            {"title": "OpenAI Codex 手机接码", "target_category": "other"}
+        )
+        is None
+    )
+    assert (
+        review._publish_review_bucket(
+            {"title": "Gemini Pro一年卡密", "target_category": "gemini"}
+        )
+        is None
+    )
+    assert (
+        review._publish_review_bucket(
+            {
+                "title": "GPT/Codex Free 成品号｜已绑定手机",
+                "target_category": "gpt-ready-account",
+            }
+        )
+        is None
+    )
+    assert (
+        review._publish_review_bucket(
+            {"title": "Claude自助接码服务", "target_category": "claude"}
+        )
+        is None
+    )
+    assert (
+        review._publish_review_bucket(
+            {"title": "微软邮箱长效-outlook", "target_category": "email"}
+        )
+        is None
+    )
+    # Grok 暂不进上架审核
+    assert (
+        review._publish_review_bucket(
+            {"title": "Super Grok 7天会员号---带SSO", "target_category": "other"}
+        )
+        is None
+    )
+    assert (
+        review._publish_review_bucket(
+            {
+                "title": "Grok Super直充卡密（两个月）",
+                "target_category": "grok-official-recharge",
+            }
+        )
+        is None
+    )
+
+
+def test_first_publish_skips_delisted_keeps_out_of_stock():
+    # 商城下架
+    assert (
+        review._is_first_publish_row(
+            {
+                "title": "稳UPI gptplus会员独享月卡成品",
+                "target_category": "gpt-unverified-account",
+                "catalog_surface": "hidden",
+                "catalog_visible": False,
+                "listed": False,
+                "in_stock": False,
+                "editorial_status": "needs_review",
+            }
+        )
+        is False
+    )
+    # 在架无货的官方充值仍可待上架
+    assert (
+        review._is_first_publish_row(
+            {
+                "title": "GPT 5xPro [谷歌] CDK 自动充值 质保30天",
+                "target_category": "other",
+                "catalog_surface": "hidden",
+                "catalog_visible": False,
+                "listed": True,
+                "in_stock": False,
+                "editorial_status": "needs_review",
+            }
+        )
+        is True
+    )
+    # 有货官方充值
+    assert (
+        review._is_first_publish_row(
+            {
+                "title": "GPT Plus [谷歌] CDK 自动充值 质保30天",
+                "target_category": "gpt-official-recharge",
+                "catalog_surface": "hidden",
+                "catalog_visible": False,
+                "listed": True,
+                "in_stock": True,
+                "editorial_status": "needs_review",
+            }
+        )
+        is True
+    )
 
 
 def test_pending_menu_numbers_and_selection(tmp_path, monkeypatch):
@@ -185,6 +447,7 @@ def test_pending_menu_numbers_and_selection(tmp_path, monkeypatch):
         "shop.core_client.fetch_review_queue_sync",
         lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("core disabled in test")),
     )
+    monkeypatch.setattr(review, "_load_first_publish_items", lambda: [])
     monkeypatch.setattr(
         review,
         "load_state",
@@ -197,6 +460,7 @@ def test_pending_menu_numbers_and_selection(tmp_path, monkeypatch):
     assert [m["product_id"] for m in menu] == ["g28zpj", "90kcuj"]
     text = review.format_pending_menu(menu)
     assert "1." in text and "2." in text
+    assert "上架审核" in text  # 末尾提示（即使数量为 0 也会说明）
     assert review.resolve_menu_selection("1") == "g28zpj"
     assert review.resolve_menu_selection("审核 2") == "90kcuj"
 
@@ -260,6 +524,98 @@ def test_keep_title_then_effective_title():
         "force_original_title": True,
     }
     assert review.effective_title(session) == "原标题"
+
+
+def test_compact_decision_payload_is_small():
+    session = {
+        "id": "sess1",
+        "source": "menu",
+        "round": 2,
+        "product": {"id": "ejggbt", "title": "原标题很长" * 5},
+        "draft": {
+            "proposed_title": "新标题",
+            "surface": "official-membership",
+            "target_category": "gpt-official-recharge",
+            "fulfillment_mode": "self-service-redemption",
+            "short_title": "短",
+            "usage": {"steps": [{"title": "a"}, {"title": "b"}]},
+        },
+        "force_original_title": False,
+    }
+    decision = review._compact_decision_payload(
+        session,
+        status="published",
+        note="ok",
+        publish_body={
+            "display_title": "新标题",
+            "catalog_surface": "official-membership",
+            "catalog_visible": True,
+            "description_html": "<p>huge</p>" * 100,
+            "membership_placement": {"mode": "attach_option"},
+        },
+    )
+    assert decision["status"] == "published"
+    assert decision["usage_step_count"] == 2
+    assert "description_html" not in (decision.get("publish_body") or {})
+    assert decision["publish_body"]["membership_placement"]["mode"] == "attach_option"
+
+
+@pytest.mark.asyncio
+async def test_record_decision_prefers_core(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    called: dict = {}
+
+    async def _fake_core(product_id: str, *, status: str, decision=None):
+        called["product_id"] = product_id
+        called["status"] = status
+        called["decision"] = decision
+        return {"product_id": product_id, "status": status, "decision_count": 1}
+
+    monkeypatch.setattr("shop.core_client.record_review_decision", _fake_core)
+    session = {
+        "id": "s1",
+        "product": {"id": "ejggbt", "title": "t"},
+        "draft": {"proposed_title": "t2", "surface": "official-membership", "usage": {"steps": []}},
+    }
+    result = await review._record_decision(
+        "ejggbt",
+        status="omitted",
+        session=session,
+        note="skip",
+    )
+    assert result["mode"] == "shop-core-review-queue"
+    assert called["status"] == "omitted"
+    assert called["decision"]["actor"] == "qqbot-c2c-review"
+    # no local pretty json files created on success path
+    assert not list(Path("data/review-approved").glob("*.json")) if Path("data/review-approved").exists() else True
+
+
+@pytest.mark.asyncio
+async def test_record_decision_fallback_jsonl(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    async def _boom(*_a, **_k):
+        raise RuntimeError("core down")
+
+    monkeypatch.setattr("shop.core_client.record_review_decision", _boom)
+    monkeypatch.setattr(review, "NAVIGATOR_ROOT", tmp_path / "nav")
+    result = await review._record_decision(
+        "ejggbt",
+        status="omitted",
+        session={
+            "id": "s1",
+            "product": {"id": "ejggbt", "title": "t"},
+            "draft": {"proposed_title": "t", "surface": "official-membership", "usage": {"steps": []}},
+        },
+        note="skip",
+    )
+    assert result["mode"] == "local-jsonl-fallback"
+    path = Path("data/review-approved/decisions.jsonl")
+    assert path.exists()
+    line = path.read_text(encoding="utf-8").strip().splitlines()[-1]
+    payload = json.loads(line)
+    assert payload["status"] == "omitted"
+    assert payload["product_id"] == "ejggbt"
 
 
 def test_review_sessions_roundtrip(tmp_path, monkeypatch):
