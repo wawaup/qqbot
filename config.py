@@ -1,7 +1,12 @@
 import os
+from pathlib import Path
+
 from dotenv import load_dotenv
 
-load_dotenv()
+# qqbot/.env 优先；monorepo 根目录 .env.local 作为 Grok 网关等本地密钥的补充来源
+_ROOT = Path(__file__).resolve().parent
+load_dotenv(_ROOT / ".env")
+load_dotenv(_ROOT.parent / ".env.local", override=False)
 
 BOT_APPID = os.getenv("BOT_APPID", "")
 BOT_SECRET = os.getenv("BOT_SECRET", "")
@@ -21,6 +26,40 @@ CONTENT_CHANGE_USER_OPENIDS = [
     for value in os.getenv("CONTENT_CHANGE_USER_OPENIDS", "").split(",")
     if value.strip()
 ]
+
+# 允许与机器人私聊并调用 Grok 的 user_openid（逗号分隔）。
+# 未配置时：仅回显对方 openid，不调用 LLM，避免 token 被他人消耗。
+OWNER_USER_OPENIDS = [
+    value.strip()
+    for value in os.getenv("OWNER_USER_OPENIDS", "").split(",")
+    if value.strip()
+]
+
+# Grok（经 Anthropic 兼容网关）。优先读 qqbot/.env，也可从 monorepo 根 .env.local 注入。
+GROK_API_KEY = os.getenv("GROK_API_KEY") or os.getenv("ANTHROPIC_AUTH_TOKEN", "")
+GROK_API_BASE_URL = (
+    os.getenv("GROK_API_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL", "")
+).rstrip("/")
+GROK_MODEL = (
+    os.getenv("GROK_MODEL")
+    or os.getenv("ANTHROPIC_MODEL")
+    or os.getenv("ANTHROPIC_DEFAULT_SONNET_MODEL")
+    or "grok-4.5"
+)
+GROK_MAX_TOKENS = int(os.getenv("GROK_MAX_TOKENS", "1024"))
+GROK_TIMEOUT_SECONDS = float(os.getenv("GROK_TIMEOUT_SECONDS", "60"))
+# 上新审核拟稿通常更长
+GROK_REVIEW_MAX_TOKENS = int(os.getenv("GROK_REVIEW_MAX_TOKENS", "2500"))
+
+# shop-navigator 根目录：确认后写入 overrides / catalog。留空则只落本地审核快照（dry-run）
+_NAV_DEFAULT = _ROOT.parent / "shop-navigator"
+NAVIGATOR_ROOT = Path(
+    os.getenv("NAVIGATOR_ROOT", str(_NAV_DEFAULT if _NAV_DEFAULT.is_dir() else ""))
+).expanduser()
+REVIEW_APPLY_ENABLED = os.getenv("REVIEW_APPLY_ENABLED", "true").lower() == "true"
+# 本地测试接口：POST /api/v1/review/start （仅绑定本机时建议开启）
+REVIEW_API_ENABLED = os.getenv("REVIEW_API_ENABLED", "true").lower() == "true"
+REVIEW_API_TOKEN = os.getenv("REVIEW_API_TOKEN", "")  # 非空则要求 Header X-Review-Token
 
 SHOP_URL = os.getenv("SHOP_URL", "https://pay.ldxp.cn/shop/manboup")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))

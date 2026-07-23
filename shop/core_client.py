@@ -93,3 +93,75 @@ async def fetch_status_payload() -> dict[str, Any]:
     if not isinstance(payload, dict) or payload.get("schema_version") != 1:
         raise ShopCoreError("shop-core status 契约不匹配")
     return payload
+
+
+def _require_core() -> str:
+    if not SHOP_CORE_BASE_URL:
+        raise ShopCoreError("SHOP_CORE_BASE_URL 未配置")
+    if not SHOP_CORE_INTERNAL_TOKEN:
+        raise ShopCoreError("SHOP_CORE_INTERNAL_TOKEN 未配置")
+    return SHOP_CORE_BASE_URL.rstrip("/")
+
+
+async def fetch_review_queue(*, pending_only: bool = True) -> list[dict[str, Any]]:
+    base = _require_core()
+    url = f"{base}/api/internal/review-queue"
+    async with httpx.AsyncClient(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = await client.get(
+            url,
+            headers=_headers(),
+            params={"pending_only": str(pending_only).lower()},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    items = payload.get("items") if isinstance(payload, dict) else None
+    return items if isinstance(items, list) else []
+
+
+async def fetch_publish_context(product_id: str) -> dict[str, Any]:
+    base = _require_core()
+    url = f"{base}/api/internal/publish-context/{product_id}"
+    async with httpx.AsyncClient(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = await client.get(url, headers=_headers())
+        if response.status_code == 404:
+            raise ShopCoreError(f"商品不存在：{product_id}")
+        response.raise_for_status()
+        payload = response.json()
+    if not isinstance(payload, dict):
+        raise ShopCoreError("publish-context 响应格式错误")
+    return payload
+
+
+async def publish_product(product_id: str, body: dict[str, Any]) -> dict[str, Any]:
+    """Call shop-core atomic publish. Raises ShopCoreError with detail on 4xx."""
+    base = _require_core()
+    url = f"{base}/api/internal/products/{product_id}/publish"
+    async with httpx.AsyncClient(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = await client.post(url, headers=_headers(), json=body)
+        if response.status_code >= 400:
+            detail = response.text
+            try:
+                data = response.json()
+                if isinstance(data, dict) and data.get("detail"):
+                    detail = str(data["detail"])
+            except Exception:
+                pass
+            raise ShopCoreError(f"publish 失败 ({response.status_code}): {detail}")
+        payload = response.json()
+    if not isinstance(payload, dict):
+        raise ShopCoreError("publish 响应格式错误")
+    return payload
+
+
+async def fetch_inventory_events(*, since: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+    base = _require_core()
+    url = f"{base}/api/internal/inventory/events"
+    params: dict[str, Any] = {"limit": limit}
+    if since:
+        params["since"] = since
+    async with httpx.AsyncClient(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = await client.get(url, headers=_headers(), params=params)
+        response.raise_for_status()
+        payload = response.json()
+    events = payload.get("events") if isinstance(payload, dict) else None
+    return events if isinstance(events, list) else []

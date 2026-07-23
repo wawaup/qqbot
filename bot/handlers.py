@@ -11,7 +11,7 @@ from pathlib import Path
 import jieba
 import botpy
 from botpy.manage import GroupManageEvent
-from botpy.message import GroupMessage
+from botpy.message import C2CMessage, GroupMessage
 from botpy.types import message as msg_types
 
 jieba.initialize()  # 启动时预加载词典，避免首次查询阻塞事件循环
@@ -24,7 +24,15 @@ from bot.formatter import (
     format_product_menu,
     format_search_results,
 )
-from config import BOT_OPENID, CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
+from bot.llm import GrokError, chat as grok_chat, grok_configured
+from bot.review import handle_owner_text as handle_review_owner_text
+from config import (
+    BOT_OPENID,
+    CATEGORY_COMMANDS_FILE,
+    KEYWORDS_FILE,
+    OWNER_USER_OPENIDS,
+    PICS_URLS,
+)
 from storage.state import load_state
 
 logger = logging.getLogger(__name__)
@@ -198,6 +206,35 @@ async def _reply_markdown(message: GroupMessage, text: str) -> None:
     )
 
 
+async def _reply_c2c_text(message: C2CMessage, text: str) -> None:
+    """私聊被动回复。优先 Markdown，失败时回退纯文本。"""
+    content = (text or "").strip() or "（空回复）"
+    # QQ 单条消息不宜过长，预留余量截断
+    if len(content) > 3500:
+        content = content[:3490] + "\n…(已截断)"
+    try:
+        await message._api.post_c2c_message(
+            openid=message.author.user_openid,
+            msg_type=2,
+            msg_id=message.id,
+            msg_seq=_next_seq(message.id),
+            markdown=msg_types.MarkdownPayload(content=content),
+        )
+    except Exception as exc:
+        logger.warning("C2C markdown 发送失败，回退文本: %s", exc)
+        await message._api.post_c2c_message(
+            openid=message.author.user_openid,
+            msg_type=0,
+            msg_id=message.id,
+            msg_seq=_next_seq(message.id),
+            content=content,
+        )
+
+
+def _is_owner_openid(user_openid: str | None) -> bool:
+    return bool(user_openid) and user_openid in OWNER_USER_OPENIDS
+
+
 async def _send_image_only(message: GroupMessage, image_url: str) -> None:
     media = await message._api.post_group_file(
         group_openid=message.group_openid,
@@ -269,6 +306,105 @@ class BotHandlers(botpy.Client):
 
     async def on_group_msg_receive(self, event: GroupManageEvent):
         logger.info(f"[群管理] 群开启主动消息 group_openid={event.group_openid}")
+
+    async def on_c2c_message_create(self, message: C2CMessage):
+        """私聊消息：打印 user_openid；仅 OWNER_USER_OPENIDS 可调用 Grok / 上新审核。"""
+        user_openid = getattr(getattr(message, "author", None), "user_openid", None) or ""
+        content = (message.content or "").strip()
+        is_owner = _is_owner_openid(user_openid)
+        logger.info(
+            "[私聊] user_openid=%s is_owner=%s content=%r",
+            user_openid,
+            is_owner,
+            content,
+        )
+        try:
+            if not user_openid:
+                logger.warning("[私聊] 消息缺少 user_openid，忽略")
+                return
+
+            # 未授权用户：只回显 openid，绝不调用 LLM，防止 token 被消耗
+            if not is_owner:
+                await _reply_c2c_text(
+                    message,
+                    "你好。当前账号未授权私聊助手。\n\n"
+                    f"你的 user_openid 是：\n`{user_openid}`\n\n"
+                    "请把该值写入 qqbot/.env 的 `OWNER_USER_OPENIDS`（多个用逗号分隔）后重启机器人。",
+                )
+                return
+
+            # 授权用户：先识别 openid 查询指令
+            lower = content.lower()
+            if not content or lower in {"openid", "我的openid", "whoami", "id"}:
+                owners = ", ".join(OWNER_USER_OPENIDS) if OWNER_USER_OPENIDS else "（未配置）"
+                await _reply_c2c_text(
+                    message,
+                    f"你的 user_openid：\n`{user_openid}`\n\n"
+                    f"当前已授权：{owners}\n"
+                    f"Grok 配置：{'已就绪' if grok_configured() else '未配置'}\n\n"
+                    "上新审核：发送 `审核测试` 或 `审核 商品id`，`审核帮助` 查看说明。",
+                )
+                return
+
+            # 上新审核 skill（进行中会话 / 审核指令）优先于闲聊
+            try:
+                review_reply = await handle_review_owner_text(content)
+            except Exception:
+                logger.error(f"[私聊] 审核处理异常:\n{traceback.format_exc()}")
+                review_reply = ""
+            if review_reply:
+                await _reply_c2c_text(message, review_reply)
+                return
+
+            if not grok_configured():
+                await _reply_c2c_text(
+                    message,
+                    "Grok API 尚未配置。请在 qqbot/.env 或 monorepo 根目录 .env.local 中设置 "
+                    "`GROK_API_KEY`/`ANTHROPIC_AUTH_TOKEN` 与 `GROK_API_BASE_URL`/`ANTHROPIC_BASE_URL`。\n"
+                    "若只想测审核流程，也可先发 `审核帮助`。",
+                )
+                return
+
+            try:
+                reply = await grok_chat(content)
+            except GrokError as exc:
+                logger.error("[私聊] Grok 调用失败: %s", exc)
+                await _reply_c2c_text(message, f"助手暂时不可用：{exc}")
+                return
+
+            await _reply_c2c_text(message, reply)
+        except Exception:
+            logger.error(f"[私聊] 处理异常:\n{traceback.format_exc()}")
+
+    async def push_c2c_to_owners(self, text: str) -> bool:
+        """主动私信所有 OWNER（用于 API/定时任务触发审核推送）。"""
+        if not OWNER_USER_OPENIDS:
+            logger.warning("OWNER_USER_OPENIDS 未配置，无法主动私信")
+            return False
+        sent = False
+        for user_openid in OWNER_USER_OPENIDS:
+            try:
+                # 主动消息不依赖 msg_id；超长截断
+                content = (text or "").strip() or "（空）"
+                if len(content) > 3500:
+                    content = content[:3490] + "\n…(已截断)"
+                try:
+                    await self.api.post_c2c_message(
+                        openid=user_openid,
+                        msg_type=2,
+                        markdown=msg_types.MarkdownPayload(content=content),
+                    )
+                except Exception:
+                    await self.api.post_c2c_message(
+                        openid=user_openid,
+                        msg_type=0,
+                        content=content,
+                    )
+                logger.info("[%s] 主动私信已发送", user_openid)
+                sent = True
+            except Exception as error:
+                logger.error("[%s] 主动私信失败: %s", user_openid, error)
+        return sent
 
     async def on_group_at_message_create(self, message: GroupMessage):
         """有人 @机器人 时触发。"""

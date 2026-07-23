@@ -142,6 +142,27 @@ async def scan_and_notify(first_run: bool = False) -> None:
     if _bot_client is not None:
         if new_products:
             await _bot_client.send_new_product_notice(new_products)
+            # Auto-start C2C publish review for owners (serial queue inside review skill).
+            try:
+                from bot import review as review_skill
+
+                for product in new_products:
+                    try:
+                        _session, msg = await review_skill.start_publish_review(
+                            product.id,
+                            source="inventory_new",
+                        )
+                        await _bot_client.push_c2c_to_owners(
+                            f"新品待上架审核 `{product.id}`\n\n{msg}"
+                        )
+                    except Exception as review_exc:  # noqa: BLE001
+                        logger.warning(
+                            "auto publish review failed for %s: %s",
+                            product.id,
+                            review_exc,
+                        )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("auto publish review hook failed: %s", exc)
         if restocked_products:
             await _bot_client.send_restock_notice(restocked_products)
 

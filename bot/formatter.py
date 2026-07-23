@@ -1,12 +1,35 @@
 from collections import defaultdict
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from shop.models import Product
 
 
+def format_price(price) -> str:
+    """展示价格：整数不带小数；有小数只保留 1 位（如 21.50 → 21.5，22.00 → 22）。"""
+    if price is None:
+        return ""
+    text = str(price).strip()
+    if not text:
+        return ""
+    raw = text
+    for token in ("元", "￥", "¥", "r", "R", "CNY", "cny"):
+        raw = raw.replace(token, "")
+    raw = raw.strip()
+    try:
+        value = Decimal(raw)
+    except (InvalidOperation, ValueError):
+        return text
+    quantized = value.quantize(Decimal("0.1"), rounding=ROUND_HALF_UP)
+    if quantized == quantized.to_integral_value():
+        return str(int(quantized))
+    return format(quantized, "f")
+
+
 def _price_label(p: "Product") -> str:
-    return f"{p.price}r · " if p.price else ""
+    price = format_price(getattr(p, "price", ""))
+    return f"{price}r · " if price else ""
 
 
 def _item_line(i: int, p: "Product") -> str:
@@ -120,11 +143,39 @@ _CONTENT_CHANGE_LABELS = {
 
 
 def format_content_change_notice(changes: list) -> str:
+    urgent = [c for c in changes if getattr(c, "warranty_shortened", False)]
+    normal = [c for c in changes if not getattr(c, "warranty_shortened", False)]
+
     lines = ["# 📝 商品资料变化待处理"]
-    lines.append(f"发现 {len(changes)} 个商品的说明或图片来源发生变化，请同步 shop-navigator 后检查。")
-    for change in changes[:10]:
-        labels = "、".join(_CONTENT_CHANGE_LABELS[field] for field in change.changed_fields)
-        lines.extend((f"\n## {change.title}", f"变化：{labels}", change.url))
-    if len(changes) > 10:
-        lines.append(f"\n另有 {len(changes) - 10} 个商品发生变化，请查看服务器日志。")
+    if urgent:
+        lines.append(
+            f"⚠️ **成品号质保缩短 {len(urgent)} 件（重要，请优先处理）**；"
+            f"其余资料变化 {len(normal)} 件。"
+        )
+        lines.append("私聊发 `待审清单` 可按序号逐个审核。")
+    else:
+        lines.append(
+            f"发现 {len(changes)} 个商品的说明或图片来源发生变化，"
+            "可私聊发 `待审清单` 按序号审核。"
+        )
+
+    shown = 0
+    for change in urgent + normal:
+        if shown >= 12:
+            break
+        labels = "、".join(
+            _CONTENT_CHANGE_LABELS.get(field, field) for field in change.changed_fields
+        )
+        header = change.title
+        if getattr(change, "warranty_shortened", False):
+            header = f"⚠️ {header}"
+        lines.extend((f"\n## {header}", f"变化：{labels}"))
+        if getattr(change, "warranty_summary", ""):
+            lines.append(f"质保：{change.warranty_summary}")
+        if getattr(change, "previous_title", "") and "title" in change.changed_fields:
+            lines.append(f"原标题：{change.previous_title}")
+        lines.append(change.url)
+        shown += 1
+    if len(changes) > shown:
+        lines.append(f"\n另有 {len(changes) - shown} 个商品发生变化。私聊 `待审清单` 查看全部。")
     return "\n".join(lines)

@@ -52,6 +52,10 @@ qqbot/
 | `BOT_SECRET` | QQ 开放平台 Secret | 必填 |
 | `GROUP_OPENIDS` | 目标群 openid，逗号分隔多群 | 必填 |
 | `BOT_OPENID` | 机器人自身的 member openid（过滤自@） | 必填 |
+| `OWNER_USER_OPENIDS` | 允许私聊调用 Grok 的 user_openid，逗号分隔 | 空=仅回显 openid，不调 LLM |
+| `GROK_API_KEY` / `ANTHROPIC_AUTH_TOKEN` | Grok 网关密钥（也可从 monorepo 根 `.env.local` 读） | 私聊助手需要 |
+| `GROK_API_BASE_URL` / `ANTHROPIC_BASE_URL` | Anthropic 兼容网关地址 | 私聊助手需要 |
+| `GROK_MODEL` | 模型名，默认 `grok-4.5` | 可选 |
 | `SHOP_URL` | 店铺地址 | `https://pay.ldxp.cn/shop/manboup` |
 | `SCAN_INTERVAL` | 爬虫扫描间隔（秒） | `60` |
 | `SANDBOX` | 沙盒模式，不真实发消息 | `false` |
@@ -119,6 +123,32 @@ qqbot/
 主动推送（新品/上架/补货）通过 `_broadcast()` 遍历 `GROUP_OPENIDS` 发送，不依赖 `msg_id`。
 
 每条触发消息最多可发 5 条回复（`msg_seq` 计数器，按 `msg_id` 追踪）。
+
+### 6. C2C 私聊（店主助手）
+
+- 事件：`on_c2c_message_create`（`public_messages` intent 已覆盖）
+- **白名单**：只有 `OWNER_USER_OPENIDS` 里的 `user_openid` 才会调用 Grok；其他人私聊只会收到自己的 openid 提示，**绝不消耗 LLM token**
+- 获取 openid：用自己的 QQ 私聊机器人任意内容 → 回复/日志里的 `user_openid` → 写入 `.env` 的 `OWNER_USER_OPENIDS` 后重启
+- Grok：`bot/llm.py` 走 Anthropic Messages 兼容接口（`/v1/messages`），密钥优先 `GROK_*`，否则读 monorepo 根 `.env.local` 的 `ANTHROPIC_*`
+- 授权用户发 `openid` / `whoami` 可复查自己的 openid 与配置状态
+
+### 7. 上新审核 Skill（C2C）
+
+- 实现：`bot/review.py` + `storage/review_sessions.py` + `bot/warranty.py`
+- **先清单后开审**：私聊 `待审清单`（或单独发 `审核`）→ 按序号回复 `1` / `审核 1` 再进入具体审核
+- 其它指令：`审核 <product_id>` / `审核测试` / `审核状态` / `审核帮助`
+- 审核中回复语义：
+  - `可以` / `OK` → **提交草稿并完成**（移出待审）
+  - `不用调整` / `省略` → **完成且不改**，移出待审（不写 overrides）
+  - `暂不改` → 退出本轮，**仍留在待审清单**（标记 ⏸），下次再改
+  - 其它长句 → 修改意见，Grok 重拟后再审
+  - `取消` → 退出本轮，不标记完成，仍在清单
+- 私聊稿同时展示**原标题 vs 建议标题**；详情 HTML 按来源同步，不经模型改写
+- 确认后写入：`shop-navigator/data/overrides/products/{id}.json` 等；省略只改 review-queue 状态
+- **成品号质保特例**（`bot/warranty.py` + `content_state.diff_snapshots`）：
+  - 标题仅「上架/补货时间」话术变化、质保天数不变 → **不通知**
+  - 质保天数缩短（如 30→25）→ **强制通知并置顶**
+- HTTP 测试：`POST /api/v1/review/test`、`POST /api/v1/review/start`、`GET /api/v1/review/status`
 
 ## 架构关键点
 

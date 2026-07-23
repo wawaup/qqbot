@@ -10,6 +10,7 @@ logging.basicConfig(
 
 import botpy
 
+from api.server import set_bot_client as set_api_bot_client
 from api.server import start_status_server
 from bot.handlers import BotHandlers
 from config import (
@@ -40,6 +41,7 @@ class App(BotHandlers):
         logger.info(f"机器人「{self.robot.name}」已上线")
         await super().on_ready()  # 注册 group_message_create parser 补丁
         set_bot_client(self)
+        set_api_bot_client(self)
 
         if not App._initialized:
             App._initialized = True

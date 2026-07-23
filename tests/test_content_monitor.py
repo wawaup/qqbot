@@ -54,7 +54,16 @@ def test_content_change_notice_lists_actionable_fields():
             title="GPT Plus 新标题",
             url="https://pay.ldxp.cn/item/test",
             changed_fields=("description", "detail_images"),
-        )
+        ),
+        content_state.ContentChange(
+            product_id="prep",
+            title="质保25天 成品",
+            url="https://pay.ldxp.cn/item/prep",
+            changed_fields=("title",),
+            previous_title="质保30天 成品",
+            warranty_shortened=True,
+            warranty_summary="质保缩短：30 天 → 25 天",
+        ),
     ]
 
     message = format_content_change_notice(changes)
@@ -62,6 +71,8 @@ def test_content_change_notice_lists_actionable_fields():
     assert "商品资料变化待处理" in message
     assert "商品说明、详情图片" in message
     assert "https://pay.ldxp.cn/item/test" in message
+    assert "质保缩短" in message
+    assert "待审清单" in message
 
 
 def test_detail_image_urls_are_normalized_and_deduplicated():

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from bot.warranty import analyze_warranty_title_change
+
 _CONTENT_STATE_FILE = Path("content_state.json")
 
 
@@ -13,6 +15,10 @@ class ContentChange:
     title: str
     url: str
     changed_fields: tuple[str, ...]
+    previous_title: str = ""
+    warranty_shortened: bool = False
+    warranty_summary: str = ""
+    suppressible: bool = False  # 仅上架时间话术、可降噪
 
 
 def _description_hash(description_html: str) -> str:
@@ -31,6 +37,7 @@ def build_snapshot(products: dict[str, dict]) -> dict[str, dict]:
         snapshot[product_id] = {
             "title": str(product.get("title", "")),
             "url": str(product.get("url", "")),
+            "category": str(product.get("category", "")),
             "description_sha256": _description_hash(description_html),
             "cover_url": str(product.get("cover_url", "")),
             "detail_image_urls": [str(url) for url in detail_image_urls],
@@ -69,19 +76,42 @@ def diff_snapshots(
     changes = []
     for product_id, product in sorted(current.items()):
         old = previous.get(product_id)
+        previous_title = ""
+        warranty_shortened = False
+        warranty_summary = ""
+        suppressible = False
         if old is None:
             changed_fields = ("new_product",)
         else:
             fields = []
-            if old.get("title") != product.get("title"):
+            previous_title = str(old.get("title") or "")
+            new_title = str(product.get("title") or "")
+            if previous_title != new_title:
                 fields.append("title")
+                analysis = analyze_warranty_title_change(
+                    previous_title,
+                    new_title,
+                    category=str(product.get("category") or old.get("category") or ""),
+                )
+                if analysis is not None:
+                    warranty_summary = analysis.summary
+                    warranty_shortened = analysis.shortened
+                    # 成品号标题仅上架时间话术、质保未变：若没有其它字段变化，可降噪
+                    if analysis.listing_time_only and not analysis.shortened:
+                        suppressible = True
             if old.get("description_sha256") != product.get("description_sha256"):
                 fields.append("description")
+                suppressible = False
             if old.get("cover_url") != product.get("cover_url"):
                 fields.append("cover")
+                suppressible = False
             if old.get("detail_image_urls") != product.get("detail_image_urls"):
                 fields.append("detail_images")
+                suppressible = False
             changed_fields = tuple(fields)
+            # 仅标题上的上架时间话术噪音：不进入待处理列表
+            if suppressible and changed_fields == ("title",):
+                continue
         if changed_fields:
             changes.append(
                 ContentChange(
@@ -89,6 +119,12 @@ def diff_snapshots(
                     title=product.get("title", ""),
                     url=product.get("url", ""),
                     changed_fields=changed_fields,
+                    previous_title=previous_title,
+                    warranty_shortened=warranty_shortened,
+                    warranty_summary=warranty_summary,
+                    suppressible=suppressible,
                 )
             )
+    # 质保缩短的优先排前面
+    changes.sort(key=lambda c: (0 if c.warranty_shortened else 1, c.product_id))
     return changes
