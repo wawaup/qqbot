@@ -5,14 +5,9 @@ QQ 群机器人：库存通知、关键词回复、店主 C2C 上新审核。
 
 ## 启动前依赖
 
-1. **shop-core** 已运行（API + worker），见 monorepo / `shop-core/README.md`
-2. 已 seed bot blob（关键词等），或本机 core 里已有配置：
-   ```bash
-   cd ../shop-core/backend
-   uv run python scripts/seed_bot_blobs.py \
-     --keywords ../../qqbot/config.example/keywords.json \
-     --category-commands ../../qqbot/config.example/category_commands.json
-   ```
+1. **shop-core** 已运行（API + worker），见 monorepo / `shop-core/README.md`  
+   Docker 启动时会 **自动 bootstrap** bot 关键词等到 `app_blobs`，服务器不必再跑 `seed_bot_blobs.py`。
+2. 本机若不用 Docker、且空库：`cd ../shop-core/backend && uv run python -m shop_core.bootstrap`
 
 ## 本地启动
 

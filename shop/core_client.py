@@ -196,7 +196,8 @@ async def record_review_decision(
     return payload
 
 
-async def fetch_inventory_events(*, since: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+async def fetch_inventory_events(*, since: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    """Inventory change events from shop-core (new|relisted|restocked)."""
     base = _require_core()
     url = f"{base}/api/internal/inventory/events"
     params: dict[str, Any] = {"limit": limit}
@@ -208,6 +209,47 @@ async def fetch_inventory_events(*, since: str | None = None, limit: int = 50) -
         payload = response.json()
     events = payload.get("events") if isinstance(payload, dict) else None
     return events if isinstance(events, list) else []
+
+
+async def fetch_content_change_events(*, since: str | None = None, limit: int = 200) -> list[dict[str, Any]]:
+    """Description/content change events from shop-core worker."""
+    base = _require_core()
+    url = f"{base}/api/internal/content/changes"
+    params: dict[str, Any] = {"limit": limit}
+    if since:
+        params["since"] = since
+    async with httpx.AsyncClient(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = await client.get(url, headers=_headers(), params=params)
+        response.raise_for_status()
+        payload = response.json()
+    events = payload.get("events") if isinstance(payload, dict) else None
+    return events if isinstance(events, list) else []
+
+
+def product_from_inventory_event(
+    event: dict[str, Any],
+    products: dict[str, Product] | None = None,
+) -> Product | None:
+    """Map a core inventory event to a Product for notifications."""
+    product_id = str(event.get("product_id") or "").strip()
+    if not product_id:
+        return None
+    if products and product_id in products:
+        return products[product_id]
+    stock_count = int(event.get("stock_count") or 0)
+    return Product(
+        id=product_id,
+        title=str(event.get("title") or product_id),
+        url=str(event.get("url") or ""),
+        category=str(event.get("category") or "其他"),
+        category_id=event.get("category_id") if isinstance(event.get("category_id"), int) else None,
+        in_stock=stock_count > 0,
+        price=str(event.get("price") or ""),
+        stock_count=stock_count,
+        description=str(event.get("description") or ""),
+        description_html=str(event.get("description_html") or ""),
+        cover_url=str(event.get("cover_url") or ""),
+    )
 
 
 def fetch_catalog_products_sync() -> list[dict[str, Any]]:

@@ -52,14 +52,10 @@ CONTENT_CHANGE_USER_OPENIDS=
 # GROK_MODEL=grok-4.5
 ```
 
-关键词等配置用 core seed，不必在服务器放 `keywords.json`：
+关键词等已由 **shop-core 容器 entrypoint 自动 bootstrap**（`shop_core/seeds/bot/`），不必在服务器再跑 seed，也不必放 `keywords.json`。  
+若 core 空库且你没用 Docker entrypoint：`uv run python -m shop_core.bootstrap`。
 
-```bash
-cd /path/to/shop-core/backend
-uv run python scripts/seed_bot_blobs.py \
-  --keywords /path/to/qqbot/config.example/keywords.json \
-  --category-commands /path/to/qqbot/config.example/category_commands.json
-```
+bot 本地 `state.json` / cursor **可空启动**；扫描后会重建。不必从旧机拷贝运行态。
 
 `GROUP_OPENIDS` 只用于补货/新品等群通知；留空则不发这类主动通知。  
 私信目标必须是开放平台 `user_openid`，不能填普通 QQ 号。

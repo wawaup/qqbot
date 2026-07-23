@@ -72,8 +72,9 @@ def save_snapshot(products: dict[str, dict]) -> None:
         "checked_at": datetime.now().isoformat(timespec="seconds"),
         "products": products,
     }
-    if put_blob_payload(QQBOT_CONTENT_STATE, data, kind="runtime"):
-        return
+    # put_blob_payload raises BlobWriteError when fail-closed and core write fails.
+    put_blob_payload(QQBOT_CONTENT_STATE, data, kind="runtime")
+    # Local mirror: cache after core success, or sole store when core disabled.
     temporary_file = _CONTENT_STATE_FILE.with_name(f".{_CONTENT_STATE_FILE.name}.tmp")
     temporary_file.write_text(
         json.dumps(data, ensure_ascii=False, indent=2),

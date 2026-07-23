@@ -113,6 +113,106 @@ def test_normalize_draft_defaults():
     assert draft["issues"] == ["确认质保"]
 
 
+def test_normalize_draft_strips_description_dumped_into_usage():
+    """模型把商品详情整段塞进操作步骤时，必须丢掉，避免详情区重复。"""
+    detail = (
+        "谷歌实付，非零元购黑充，带账单，可正常续费，质保三十天订阅\n"
+        "可覆盖plus，秒到账，无需等待，可以囤卡\n"
+        "兑换地址：https://czgptplus.xyz/\n"
+        "如遇会员没有到账 请刷新下订阅用session"
+    )
+    product = {
+        "id": "ejggbt",
+        "title": "GPT Plus 官方订阅卡密",
+        "category": "官方订阅充值",
+        "description": detail,
+    }
+    draft = review._normalize_draft(
+        {
+            "proposed_title": "ChatGPT Plus · 卡密兑换",
+            "surface": "official-membership",
+            "usage": {
+                "intro_markdown": detail,
+                "steps": [
+                    {
+                        "title": "商品说明",
+                        "body_markdown": (
+                            "谷歌实付，非零元购黑充，带账单，可正常续费，质保三十天订阅。"
+                            "可覆盖plus，秒到账，无需等待，可以囤卡。\n\n"
+                            "兑换地址：https://czgptplus.xyz/\n\n"
+                            "如遇会员没有到账 请刷新下订阅用session"
+                        ),
+                    }
+                ],
+            },
+        },
+        product,
+    )
+    assert draft["usage"]["intro_markdown"] == ""
+    assert draft["usage"]["steps"] == []
+
+
+def test_normalize_draft_keeps_real_action_steps():
+    product = {
+        "id": "ejggbt",
+        "title": "GPT Plus 官方订阅卡密",
+        "category": "官方订阅充值",
+        "description": "谷歌实付，质保三十天，兑换地址 https://czgptplus.xyz/",
+    }
+    draft = review._normalize_draft(
+        {
+            "proposed_title": "ChatGPT Plus · 卡密兑换",
+            "surface": "official-membership",
+            "usage": {
+                "steps": [
+                    {
+                        "title": "打开兑换页",
+                        "body_markdown": "打开 [兑换地址](https://czgptplus.xyz/)",
+                    },
+                    {
+                        "title": "粘贴卡密",
+                        "body_markdown": "将卡密粘贴到输入框并提交兑换",
+                    },
+                ]
+            },
+        },
+        product,
+    )
+    assert len(draft["usage"]["steps"]) == 2
+    assert "兑换" in draft["usage"]["steps"][0]["body_markdown"]
+
+
+def test_build_publish_body_scrubs_detail_dump_usage():
+    detail = "谷歌实付，质保三十天订阅，可覆盖plus，秒到账。兑换地址：https://czgptplus.xyz/"
+    session = {
+        "product": {
+            "id": "ejggbt",
+            "title": "原标题",
+            "description": detail,
+        },
+        "draft": {
+            "proposed_title": "ChatGPT Plus · 卡密",
+            "short_title": "Plus 卡密",
+            "surface": "official-membership",
+            "target_category": "gpt-official-recharge",
+            "fulfillment_mode": "self-service-redemption",
+            "membership_guess": {
+                "mode": "attach_option",
+                "tier_id": "gpt-plus",
+                "tier_group_id": "gpt-plus-group",
+                "option_label": "1 个月",
+            },
+            "usage": {
+                "heading": "操作步骤",
+                "steps": [{"title": "说明", "body_markdown": detail}],
+            },
+        },
+    }
+    body = review.build_publish_body(session)
+    assert body["usage"]["steps"] == []
+    assert body["usage"].get("intro_markdown", "") == ""
+
+
 def test_format_review_message_includes_title_compare():
     session = {
         "round": 1,

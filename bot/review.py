@@ -92,7 +92,12 @@ DRAFT_SYSTEM = """你是商品上架整理助手，服务「曼波导购」导�
 2. 不要编造原文没有的承诺、质保天数、价格、渠道事实。
 3. proposed_title / short_title：面向用户；原标题足够好可与原文相同。
 4. surface 只能是 prepared-accounts / official-membership / other。
-5. usage.steps：只提取用户可执行动作；没有则空数组。
+5. usage（操作步骤）与商品详情严格分离——导航站会另栏展示 description_html：
+   - 只提取用户可执行动作（打开/点击/复制/粘贴/兑换/登录/填写/提交等）；
+   - 没有明确动作时 steps 必须为 []，intro_markdown 必须为 ""；
+   - 禁止把 description / 卖点 / 质保话术 / 渠道说明整段或改写后塞进 intro 或 steps；
+   - 禁止单步 body 复述整段商品详情；一步只写一个动作；
+   - 兑换/充值链接可进步骤，但说明文字必须是动作指令，不是商品介绍。
 6. 网址必须写成 Markdown 链接且只能来自原文。
 7. 官方订阅：target_category 只能来自可见品牌列表；fulfillment_mode 只能是
    self-service-redemption / assisted-topup / choice-at-purchase。
@@ -241,11 +246,79 @@ def _strip_json_fence(text: str) -> str:
     return cleaned.strip()
 
 
-def _normalize_draft(raw: dict[str, Any], product: dict[str, Any]) -> dict[str, Any]:
-    original = product["title"]
-    proposed = str(raw.get("proposed_title") or original).strip() or original
-    short_title = str(raw.get("short_title") or proposed).strip() or proposed
-    usage_in = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+# 判定「可执行动作」的弱信号；没有这些时更像卖点复述而非步骤
+_ACTION_HINT_RE = re.compile(
+    r"(打开|点击|访问|进入|复制|粘贴|粘贴|兑换|充值|登录|注册|填写|提交|扫码|"
+    r"绑定|跳转|前往|使用|输入|选择|确认|刷新|领取|激活|导入|下载|"
+    r"open|click|visit|copy|paste|redeem|login|sign\s*in|submit|go\s*to)",
+    re.I,
+)
+
+
+def _compact_compare_text(text: str) -> str:
+    """用于详情/步骤去重的归一化：去空白、标点、URL 形态统一。"""
+    cleaned = str(text or "")
+    cleaned = re.sub(r"https?://[^\s)\]>]+", "URL", cleaned, flags=re.I)
+    cleaned = re.sub(r"\[([^\]]+)\]\(\s*URL\s*\)", r"\1URL", cleaned)
+    cleaned = re.sub(r"[\s　]+", "", cleaned)
+    cleaned = re.sub(r"[，。、；：！？,.!?;:\"'“”‘’（）()【】\[\]<>《》·…—\-_/\\|]+", "", cleaned)
+    return cleaned.lower()
+
+
+def _overlap_ratio(left: str, right: str) -> float:
+    a = _compact_compare_text(left)
+    b = _compact_compare_text(right)
+    if not a or not b:
+        return 0.0
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    if shorter in longer:
+        return len(shorter) / max(len(longer), 1)
+    # 粗粒度：共享字符集合覆盖 shorter 的比例
+    shared = sum(1 for ch in set(shorter) if ch in longer)
+    return shared / max(len(set(shorter)), 1)
+
+
+def _looks_like_detail_dump(text: str, description: str) -> bool:
+    """步骤/intro 是否在复述商品详情（而非可执行动作）。"""
+    body = str(text or "").strip()
+    if not body:
+        return False
+    desc = str(description or "").strip()
+    if not desc:
+        return False
+    # 长文且与详情高度重合 → 复述
+    if len(_compact_compare_text(body)) >= 24 and _overlap_ratio(body, desc) >= 0.72:
+        return True
+    # 几乎整段相等
+    if _compact_compare_text(body) and _compact_compare_text(body) == _compact_compare_text(desc):
+        return True
+    return False
+
+
+def _is_actionable_step(title: str, body: str) -> bool:
+    blob = f"{title}\n{body}".strip()
+    if not blob:
+        return False
+    if _ACTION_HINT_RE.search(blob):
+        return True
+    # 纯链接步骤也算可执行
+    if re.search(r"https?://", blob, re.I):
+        return True
+    return False
+
+
+def _sanitize_usage(
+    usage_in: dict[str, Any],
+    *,
+    description: str,
+) -> dict[str, Any]:
+    """约束 usage：去掉详情复述，无动作则空步骤。publish 前的最后一道闸。"""
+    intro = str(usage_in.get("intro_markdown") or "").strip()
+    if _looks_like_detail_dump(intro, description) or (
+        intro and not _is_actionable_step("", intro) and _overlap_ratio(intro, description) >= 0.55
+    ):
+        intro = ""
+
     steps_in = usage_in.get("steps") if isinstance(usage_in.get("steps"), list) else []
     steps: list[dict[str, Any]] = []
     for index, step in enumerate(steps_in, start=1):
@@ -255,15 +328,46 @@ def _normalize_draft(raw: dict[str, Any], product: dict[str, Any]) -> dict[str, 
         body = str(step.get("body_markdown") or step.get("body") or "").strip()
         if not title and not body:
             continue
+        combined = f"{title}\n{body}".strip()
+        # 详情复述 / 纯卖点 → 丢弃
+        if _looks_like_detail_dump(combined, description) or _looks_like_detail_dump(body, description):
+            continue
+        if not _is_actionable_step(title, body):
+            continue
         step_id = str(step.get("id") or f"step-{index:02d}").strip()
         steps.append(
             {
                 "id": step_id,
-                "title": title or f"步骤{index}",
+                "title": title or f"步骤{len(steps) + 1}",
                 "body_markdown": body or title,
                 "image_asset": step.get("image_asset"),
             }
         )
+
+    # 单步仍等于详情时整段清空
+    if len(steps) == 1 and _looks_like_detail_dump(steps[0].get("body_markdown") or "", description):
+        steps = []
+
+    return {
+        "heading": str(usage_in.get("heading") or "操作步骤"),
+        "render": "timeline",
+        "layout": str(usage_in.get("layout") or "vertical"),
+        "intro_markdown": intro,
+        "steps": steps,
+    }
+
+
+def _normalize_draft(raw: dict[str, Any], product: dict[str, Any]) -> dict[str, Any]:
+    original = product["title"]
+    proposed = str(raw.get("proposed_title") or original).strip() or original
+    short_title = str(raw.get("short_title") or proposed).strip() or proposed
+    usage_in = raw.get("usage") if isinstance(raw.get("usage"), dict) else {}
+    description = str(product.get("description") or "")
+    # HTML 去标签作补充比对，防止模型只复述纯文本详情
+    html = str(product.get("description_html") or "")
+    if html and not description:
+        description = re.sub(r"<[^>]+>", "\n", html)
+    usage = _sanitize_usage(usage_in, description=description)
     surface = str(raw.get("surface") or "").strip()
     if surface not in {"prepared-accounts", "official-membership", "other"}:
         surface = _guess_surface(original, product.get("category", ""))
@@ -284,13 +388,7 @@ def _normalize_draft(raw: dict[str, Any], product: dict[str, Any]) -> dict[str, 
         "surface_reason": str(raw.get("surface_reason") or "").strip(),
         "target_category": target_category,
         "fulfillment_mode": fulfillment,
-        "usage": {
-            "heading": str(usage_in.get("heading") or "操作步骤"),
-            "render": "timeline",
-            "layout": str(usage_in.get("layout") or "vertical"),
-            "intro_markdown": str(usage_in.get("intro_markdown") or "").strip(),
-            "steps": steps,
-        },
+        "usage": usage,
         "usage_notes": str(raw.get("usage_notes") or "").strip(),
         "plan_presentation": plan,
         "membership_guess": membership,
@@ -1384,12 +1482,18 @@ def build_publish_body(session: dict[str, Any]) -> dict[str, Any]:
     draft = session.get("draft") or {}
     surface = draft.get("surface")
     title = effective_title(session)
+    # 发布前再 scrub 一次，防止会话里残留详情复述步骤
+    usage_raw = draft.get("usage") if isinstance(draft.get("usage"), dict) else {}
+    description = str(product.get("description") or "")
+    if not description and product.get("description_html"):
+        description = re.sub(r"<[^>]+>", "\n", str(product.get("description_html") or ""))
+    usage = _sanitize_usage(usage_raw, description=description)
     body: dict[str, Any] = {
         "display_title": title,
         "catalog_surface": surface,
         "catalog_visible": True,
         "short_title": draft.get("short_title") or title,
-        "usage": draft.get("usage") or {"heading": "操作步骤", "steps": []},
+        "usage": usage,
         "resolve_review": True,
         "generated_by": "qqbot-c2c-review",
     }

@@ -1,7 +1,8 @@
 """
 状态持久化：维护上次扫描的商品快照，计算新上架/重新上架/补货商品。
 
-优先写入 shop-core app_blobs；失败或未配置时回退本地 state.json（勿提交 git）。
+优先写入 shop-core app_blobs。core 已配置且 BLOB_FAIL_CLOSED 时，写入失败直接抛错，
+禁止「只写本地」造成恢复后丢更新。本地 state.json 仅作缓存镜像（勿提交 git）。
 """
 import json
 from datetime import datetime
@@ -87,13 +88,15 @@ def save_state(products: dict[str, "Product"]) -> None:
         "last_scan": datetime.now().isoformat(timespec="seconds"),
         "products": merged,
     }
-    if not put_blob_payload(QQBOT_INVENTORY_STATE, data, kind="runtime"):
-        temporary_file = _STATE_FILE.with_name(f".{_STATE_FILE.name}.tmp")
-        temporary_file.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        temporary_file.replace(_STATE_FILE)
+    # put_blob_payload raises BlobWriteError when fail-closed and core write fails.
+    put_blob_payload(QQBOT_INVENTORY_STATE, data, kind="runtime")
+    # Local mirror: cache after core success, or sole store when core is not configured.
+    temporary_file = _STATE_FILE.with_name(f".{_STATE_FILE.name}.tmp")
+    temporary_file.write_text(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    temporary_file.replace(_STATE_FILE)
 
 
 def diff_states(

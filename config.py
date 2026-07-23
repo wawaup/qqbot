@@ -51,12 +51,13 @@ GROK_TIMEOUT_SECONDS = float(os.getenv("GROK_TIMEOUT_SECONDS", "60"))
 # 上新审核拟稿通常更长
 GROK_REVIEW_MAX_TOKENS = int(os.getenv("GROK_REVIEW_MAX_TOKENS", "2500"))
 
-# shop-navigator 根目录：确认后写入 overrides / catalog。留空则只落本地审核快照（dry-run）
+# shop-navigator 根目录：仅当显式开启 REVIEW_APPLY_ENABLED 时写入 legacy overrides。
+# 生产默认关闭：发布必须以 shop-core publish 成功为准。
 _NAV_DEFAULT = _ROOT.parent / "shop-navigator"
 NAVIGATOR_ROOT = Path(
     os.getenv("NAVIGATOR_ROOT", str(_NAV_DEFAULT if _NAV_DEFAULT.is_dir() else ""))
 ).expanduser()
-REVIEW_APPLY_ENABLED = os.getenv("REVIEW_APPLY_ENABLED", "true").lower() == "true"
+REVIEW_APPLY_ENABLED = os.getenv("REVIEW_APPLY_ENABLED", "false").lower() == "true"
 # 本地测试接口：POST /api/v1/review/start （仅绑定本机时建议开启）
 REVIEW_API_ENABLED = os.getenv("REVIEW_API_ENABLED", "true").lower() == "true"
 REVIEW_API_TOKEN = os.getenv("REVIEW_API_TOKEN", "")  # 非空则要求 Header X-Review-Token
@@ -74,6 +75,10 @@ INVENTORY_SOURCE = os.getenv(
     "INVENTORY_SOURCE",
     "shop-core" if SHOP_CORE_BASE_URL else "ldxp",
 ).strip().lower()
+# When core blobs are enabled: put 失败是否禁止写本地权威态（默认 true，避免分叉丢更新）。
+# 设为 false 仅用于离线应急。成功写入 core 后仍会镜像一份本地缓存便于只读降级。
+_BLOB_FAIL_CLOSED_DEFAULT = "true" if (SHOP_CORE_BASE_URL and SHOP_CORE_INTERNAL_TOKEN) else "false"
+BLOB_FAIL_CLOSED = os.getenv("BLOB_FAIL_CLOSED", _BLOB_FAIL_CLOSED_DEFAULT).lower() == "true"
 
 STATUS_API_ENABLED = os.getenv("STATUS_API_ENABLED", "true").lower() == "true"
 STATUS_API_HOST = os.getenv("STATUS_API_HOST", "0.0.0.0")

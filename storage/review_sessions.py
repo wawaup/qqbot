@@ -63,8 +63,9 @@ def save(data: dict[str, Any]) -> None:
     with _LOCK:
         payload = deepcopy(data)
         payload["updated_at"] = _now()
-        if put_blob_payload(QQBOT_REVIEW_SESSIONS, payload, kind="runtime"):
-            return
+        # put_blob_payload raises BlobWriteError when fail-closed and core write fails.
+        put_blob_payload(QQBOT_REVIEW_SESSIONS, payload, kind="runtime")
+        # Local mirror for cache / offline read; not a silent sole writer under core.
         _FILE.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
