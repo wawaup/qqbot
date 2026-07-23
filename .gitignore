@@ -23,8 +23,10 @@ __pycache__/
 # 虚拟环境
 .venv/
 
-# 爬虫调试输出
+# 爬虫调试输出 / 抓包
 debug_shop.html
+*.har
+/pics/
 
 # macOS 元数据
 .DS_Store

@@ -113,6 +113,44 @@ def test_build_publish_body_official_and_prepared():
     assert body2["prepared_placement"]["login_method"] == "google-email-2fa"
 
 
+def test_guess_surface_prefers_prepared_and_official_keywords():
+    assert review._guess_surface("GPT Plus成品UPI渠道", "成品") == "prepared-accounts"
+    assert review._guess_surface("Grok Super直充卡密（两个月）", "GROK和其他") == "official-membership"
+    assert review._guess_surface("神秘礼包", "其他") == "other"
+
+
+def test_pending_menu_prefers_shop_core_queue(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(review_sessions, "_FILE", Path("review_sessions.json"))
+    monkeypatch.setattr(review, "NAVIGATOR_ROOT", tmp_path / "nav")
+    monkeypatch.setattr(
+        review,
+        "load_state",
+        lambda: {"87x586": {"title": "state标题", "price": "139.00"}},
+    )
+
+    def _fake_core(*, pending_only=True):
+        return [
+            {
+                "product_id": "87x586",
+                "status": "pending_manual_enrichment",
+                "title": "Grok Super直充卡密（两个月）",
+                "payload": {
+                    "changed_fields": ["description"],
+                    "detected_at": "2026-07-22T13:25:38Z",
+                },
+            }
+        ]
+
+    monkeypatch.setattr("shop.core_client.fetch_review_queue_sync", _fake_core)
+    menu = review.build_pending_menu()
+    assert len(menu) == 1
+    assert menu[0]["product_id"] == "87x586"
+    assert menu[0]["source"] == "shop-core"
+    assert menu[0]["title"].startswith("Grok Super")
+    assert "description" in menu[0]["changed_fields"]
+
+
 def test_pending_menu_numbers_and_selection(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(review_sessions, "_FILE", Path("review_sessions.json"))
@@ -142,6 +180,11 @@ def test_pending_menu_numbers_and_selection(tmp_path, monkeypatch):
         encoding="utf-8",
     )
     monkeypatch.setattr(review, "NAVIGATOR_ROOT", root)
+    # 强制走 navigator 文件路径，避免测试机上 live shop-core 污染
+    monkeypatch.setattr(
+        "shop.core_client.fetch_review_queue_sync",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("core disabled in test")),
+    )
     monkeypatch.setattr(
         review,
         "load_state",

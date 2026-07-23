@@ -201,9 +201,25 @@ def _product_from_state(product_id: str) -> dict[str, Any] | None:
 
 def _guess_surface(title: str, category: str) -> str:
     text = f"{title} {category}".lower()
-    if any(k in text for k in ("成品", "账号", "邮箱交付", "接码")):
+    # 成品号优先：避免「Plus 成品」被官方关键词截胡
+    if any(k in text for k in ("成品", "账号", "邮箱交付", "接码", "成品号")):
         return "prepared-accounts"
-    if any(k in text for k in ("官方", "代充", "充值", "订阅", "年卡", "月卡", "pro", "plus")):
+    if any(
+        k in text
+        for k in (
+            "官方",
+            "代充",
+            "充值",
+            "直充",
+            "卡密",
+            "cdk",
+            "订阅",
+            "年卡",
+            "月卡",
+            "pro",
+            "plus",
+        )
+    ):
         return "official-membership"
     return "other"
 
@@ -330,7 +346,15 @@ async def generate_draft(
         raise GrokError("模型返回的草稿不是合法 JSON") from exc
     if not isinstance(data, dict):
         raise GrokError("模型草稿必须是 JSON 对象")
-    return _normalize_draft(data, product)
+    draft = _normalize_draft(data, product)
+    # 若模型/启发式给出 other，但 core 已有 surface，优先信任 core
+    if publish_context and draft.get("surface") == "other":
+        core_product = publish_context.get("product") if isinstance(publish_context, dict) else None
+        core_surface = str((core_product or {}).get("catalog_surface") or "")
+        if core_surface in {PREPARED_SURFACE, OFFICIAL_SURFACE}:
+            draft["surface"] = core_surface
+            draft["surface_reason"] = (draft.get("surface_reason") or "") + "（沿用 core catalog_surface）"
+    return draft
 
 
 def classify_owner_reply(text: str) -> str:
@@ -361,14 +385,69 @@ def _navigator_root() -> Path | None:
     return None
 
 
+def _queue_item_from_raw(data: dict[str, Any], *, fallback_id: str = "", source: str) -> dict[str, Any] | None:
+    """Normalize shop-core / navigator review-queue rows into menu source items."""
+    status = str(data.get("status") or "")
+    if status and status not in _PENDING_QUEUE_STATUSES:
+        if status.startswith("approved") or status in {
+            "done",
+            "completed",
+            "skipped",
+            "omitted",
+            "published",
+            "published_via_qqbot",
+        }:
+            return None
+        # 其它未知状态：仍展示，避免漏审
+    product_id = str(data.get("product_id") or fallback_id or "")
+    if not product_id:
+        return None
+    payload = data.get("payload") if isinstance(data.get("payload"), dict) else {}
+    changed = data.get("changed_fields")
+    if not isinstance(changed, list):
+        changed = payload.get("changed_fields") if isinstance(payload.get("changed_fields"), list) else []
+    detected_at = str(
+        data.get("detected_at")
+        or payload.get("detected_at")
+        or data.get("updated_at")
+        or ""
+    )
+    title = str(data.get("title") or data.get("display_title") or payload.get("title") or "")
+    return {
+        "product_id": product_id,
+        "status": status or "pending",
+        "changed_fields": list(changed or []),
+        "detected_at": detected_at,
+        "title": title,
+        "source": source,
+    }
+
+
 def _load_review_queue_items() -> list[dict[str, Any]]:
+    """Prefer shop-core review-queue; fall back to navigator JSON files."""
+    items: list[dict[str, Any]] = []
+
+    try:
+        from shop.core_client import fetch_review_queue_sync
+
+        core_items = fetch_review_queue_sync(pending_only=True)
+        for raw in core_items:
+            if not isinstance(raw, dict):
+                continue
+            item = _queue_item_from_raw(raw, source="shop-core")
+            if item:
+                items.append(item)
+        if items:
+            return items
+    except Exception as exc:  # noqa: BLE001 — core optional for menu
+        logger.info("shop-core review-queue unavailable, fallback navigator: %s", exc)
+
     root = _navigator_root()
     if root is None:
         return []
     qdir = root / "data" / "review-queue"
     if not qdir.is_dir():
         return []
-    items: list[dict[str, Any]] = []
     for path in sorted(qdir.glob("*.json")):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
@@ -376,26 +455,9 @@ def _load_review_queue_items() -> list[dict[str, Any]]:
             continue
         if not isinstance(data, dict):
             continue
-        status = str(data.get("status") or "")
-        if status and status not in _PENDING_QUEUE_STATUSES:
-            # approved / done 等已完成状态跳过
-            if status.startswith("approved") or status in {
-                "done",
-                "completed",
-                "skipped",
-                "omitted",
-            }:
-                continue
-        product_id = str(data.get("product_id") or path.stem)
-        items.append(
-            {
-                "product_id": product_id,
-                "status": status or "pending",
-                "changed_fields": list(data.get("changed_fields") or []),
-                "detected_at": str(data.get("detected_at") or ""),
-                "source": "review-queue",
-            }
-        )
+        item = _queue_item_from_raw(data, fallback_id=path.stem, source="review-queue")
+        if item:
+            items.append(item)
     return items
 
 
@@ -447,12 +509,12 @@ def build_pending_menu() -> list[dict[str, Any]]:
         st = state_products.get(pid) if isinstance(state_products.get(pid), dict) else {}
         by_id[pid] = {
             "product_id": pid,
-            "title": str(st.get("title") or item.get("title") or pid),
+            "title": str(item.get("title") or st.get("title") or pid),
             "price": str(st.get("price") or ""),
             "status": item.get("status") or "pending",
             "changed_fields": item.get("changed_fields") or [],
             "detected_at": item.get("detected_at") or "",
-            "source": "review-queue",
+            "source": item.get("source") or "review-queue",
             "priority": 0 if "title" in (item.get("changed_fields") or []) else 1,
         }
 

@@ -103,6 +103,22 @@ def _require_core() -> str:
     return SHOP_CORE_BASE_URL.rstrip("/")
 
 
+def fetch_review_queue_sync(*, pending_only: bool = True) -> list[dict[str, Any]]:
+    """Sync helper for menu building (review skill is mostly sync around storage)."""
+    base = _require_core()
+    url = f"{base}/api/internal/review-queue"
+    with httpx.Client(timeout=SHOP_CORE_TIMEOUT_SECONDS) as client:
+        response = client.get(
+            url,
+            headers=_headers(),
+            params={"pending_only": str(pending_only).lower()},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    items = payload.get("items") if isinstance(payload, dict) else None
+    return items if isinstance(items, list) else []
+
+
 async def fetch_review_queue(*, pending_only: bool = True) -> list[dict[str, Any]]:
     base = _require_core()
     url = f"{base}/api/internal/review-queue"
