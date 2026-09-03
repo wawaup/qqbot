@@ -1,0 +1,22 @@
+listen: 0.0.0.0:__HY2_PORT__
+
+tls:
+  cert: __CERT_PATH__
+  key: __KEY_PATH__
+
+auth:
+  type: password
+  password: __HY2_PASSWORD__
+
+obfs:
+  type: salamander
+  salamander:
+    password: __OBFS_PASSWORD__
+
+ignoreClientBandwidth: true
+
+masquerade:
+  type: proxy
+  proxy:
+    url: https://__DOMAIN__
+    rewriteHost: true

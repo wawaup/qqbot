@@ -1,0 +1,117 @@
+# 回国：国内走代理，国外直连。catfk.com / wzyp.cn 强制走回国。
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+ipv6: false
+unified-delay: true
+tcp-concurrent: true
+
+profile:
+  store-selected: true
+  store-fake-ip: true
+
+tun:
+  enable: true
+  stack: mixed
+  dns-hijack:
+    - any:53
+  auto-route: true
+  auto-detect-interface: true
+  strict-route: true
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  fake-ip-filter:
+    - '*.lan'
+    - '*.local'
+    - localhost
+    - '*.localhost'
+  default-nameserver:
+    - 8.8.8.8
+    - 1.1.1.1
+  proxy-server-nameserver:
+    - https://1.1.1.1/dns-query
+  nameserver:
+    - https://1.1.1.1/dns-query
+  # rule-set: 后面只能跟规则集名字，域名要单独写 key
+  nameserver-policy:
+    'rule-set:cn':
+      - https://223.5.5.5/dns-query#节点选择
+      - https://doh.pub/dns-query#节点选择
+    'rule-set:apple-cn':
+      - https://223.5.5.5/dns-query#节点选择
+    'rule-set:google-cn':
+      - https://223.5.5.5/dns-query#节点选择
+    '+.catfk.com':
+      - https://223.5.5.5/dns-query#节点选择
+    '+.wzyp.cn':
+      - https://223.5.5.5/dns-query#节点选择
+
+proxies:
+  - name: 回国-Hysteria2
+    type: hysteria2
+    server: __DOMAIN__
+    port: __HY2_PORT__
+    password: __HY2_PASSWORD__
+    obfs: salamander
+    obfs-password: __OBFS_PASSWORD__
+    sni: __DOMAIN__
+    skip-cert-verify: false
+    alpn:
+      - h3
+
+proxy-groups:
+  - name: 节点选择
+    type: select
+    proxies:
+      - 回国-Hysteria2
+  - name: 国内
+    type: select
+    proxies:
+      - 节点选择
+  - name: 国外
+    type: select
+    proxies:
+      - DIRECT
+      - 节点选择
+
+rule-providers:
+  cn:
+    type: http
+    behavior: domain
+    format: yaml
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cn.yaml
+    path: ./ruleset/cn.yaml
+    interval: 86400
+  apple-cn:
+    type: http
+    behavior: domain
+    format: yaml
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple-cn.yaml
+    path: ./ruleset/apple-cn.yaml
+    interval: 86400
+  google-cn:
+    type: http
+    behavior: domain
+    format: yaml
+    url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google-cn.yaml
+    path: ./ruleset/google-cn.yaml
+    interval: 86400
+
+rules:
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,local,DIRECT
+  - DOMAIN-SUFFIX,catfk.com,国内
+  - DOMAIN-SUFFIX,wzyp.cn,国内
+  - RULE-SET,apple-cn,国内
+  - RULE-SET,google-cn,国内
+  - RULE-SET,cn,国内
+  - GEOIP,CN,国内,no-resolve
+  - MATCH,国外

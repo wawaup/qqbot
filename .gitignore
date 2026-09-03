@@ -25,3 +25,7 @@ debug_shop.html
 
 # 其他本地目录
 somedocs/
+
+# 回国代理密钥与渲染产物（目录本身要入库）
+proxy-setup/secrets.env
+proxy-setup/generated/
