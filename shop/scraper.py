@@ -1,7 +1,7 @@
 """
 商店爬虫：直接调用链动小铺 shopApi JSON 接口，无需浏览器。
 
-接口：POST https://pay.ldxp.cn/shopApi/Shop/goodsList
+接口：POST {shop_origin}/shopApi/Shop/goodsList
       {"token": "<shop_token>", "keywords": "", "goods_type": "card",
        "current": 1, "pageSize": 999999}
 
@@ -16,17 +16,26 @@ from bs4 import BeautifulSoup
 
 from shop.models import Product
 
-API_BASE = "https://pay.ldxp.cn/shopApi/Shop"
+OLD_SHOP_HOST = "pay.ldxp.cn"
+NEW_SHOP_HOST = "wzyp.cn"
 
-HEADERS = {
-    "Content-Type": "application/json",
-    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
-    "Referer": "https://pay.ldxp.cn/",
-}
+
+def _rewrite_shop_host(url: str) -> str:
+    """官方换域后，把商品链接里的旧前缀换成新域名。"""
+    if not url:
+        return url
+    return url.replace(f"https://{OLD_SHOP_HOST}", f"https://{NEW_SHOP_HOST}").replace(
+        f"http://{OLD_SHOP_HOST}", f"https://{NEW_SHOP_HOST}"
+    )
+
+
+def _shop_origin(shop_url: str) -> str:
+    parsed = urlparse(shop_url)
+    return f"{parsed.scheme or 'https'}://{parsed.netloc or NEW_SHOP_HOST}"
 
 
 def _extract_token(shop_url: str) -> str:
-    """从店铺 URL 提取 token，如 https://pay.ldxp.cn/shop/manboup → manboup"""
+    """从店铺 URL 提取 token，如 https://wzyp.cn/shop/manboup → manboup"""
     return urlparse(shop_url).path.rstrip("/").split("/")[-1]
 
 
@@ -39,6 +48,7 @@ def _clean_description(html: str) -> str:
 
 async def scan_all(shop_url: str) -> dict[str, Product]:
     """请求商品列表接口，返回 {goods_key: Product} 字典。"""
+    origin = _shop_origin(shop_url)
     token = _extract_token(shop_url)
     payload = {
         "token": token,
@@ -47,9 +57,14 @@ async def scan_all(shop_url: str) -> dict[str, Product]:
         "current": 1,
         "pageSize": 999999,
     }
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+        "Referer": f"{origin}/",
+    }
 
-    async with httpx.AsyncClient(headers=HEADERS, timeout=30) as client:
-        resp = await client.post(f"{API_BASE}/goodsList", json=payload)
+    async with httpx.AsyncClient(headers=headers, timeout=30) as client:
+        resp = await client.post(f"{origin}/shopApi/Shop/goodsList", json=payload)
         resp.raise_for_status()
         data = resp.json()
 
@@ -66,12 +81,12 @@ async def scan_all(shop_url: str) -> dict[str, Product]:
         products[goods_key] = Product(
             id=goods_key,
             title=item["name"],
-            url=item["link"],
+            url=_rewrite_shop_host(item["link"]),
             category=category_name,
             category_id=category.get("id"),
             in_stock=stock_count > 0,
             price=str(item.get("price", "")),
-            description=_clean_description(item.get("description", "")),
+            description=_clean_description(_rewrite_shop_host(item.get("description", ""))),
         )
 
     return products

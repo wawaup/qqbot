@@ -1,6 +1,7 @@
 """
 定时扫描任务：每 SCAN_INTERVAL 秒扫描店铺，检测上新/上架/补货并通知 QQ 群。
 """
+import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
@@ -11,6 +12,11 @@ from config import (
     NOTIFY_EXCLUDE_CATEGORIES,
     SCAN_INTERVAL,
     SHOP_URL,
+    TWITTER_ENABLED,
+    TWITTER_INCLUDE_REPLIES,
+    TWITTER_INCLUDE_RETWEETS,
+    TWITTER_SCAN_INTERVAL,
+    TWITTER_USERNAME,
 )
 from shop import scraper
 from shop.models import Product
@@ -180,6 +186,60 @@ async def send_daily_digest() -> None:
         await _bot_client.send_daily_digest(events)
 
 
+async def scan_tweets_and_notify(first_run: bool = False) -> None:
+    """拉取 Twitter 时间线，有新帖则连同文字和图片转发到群。
+
+    first_run=True 时只记下当前已有帖子 id，不转发（避免启动时把时间线刷屏）。
+    不受店铺静默时段影响：店主发推频率低，且多是主动公告。
+    """
+    if not TWITTER_ENABLED or not TWITTER_USERNAME:
+        return
+
+    from storage import twitter_state
+    from twitter.fetcher import fetch_timeline, pick_new_threads
+
+    logger.info(f"开始拉取 @{TWITTER_USERNAME} 的推文...")
+    try:
+        tweets = await fetch_timeline(TWITTER_USERNAME)
+    except Exception as e:
+        logger.error(f"拉取推文失败: {e}")
+        return
+
+    old_ids = twitter_state.load_seen_ids()
+    fetched_ids = [t.id for t in tweets]
+
+    if first_run or not old_ids:
+        twitter_state.save_seen_ids(
+            twitter_state.merge_seen(old_ids, fetched_ids),
+            username=TWITTER_USERNAME,
+        )
+        logger.info(f"推文快照建立：记下 {len(fetched_ids)} 条，启动后的新帖才会转发")
+        return
+
+    new_threads = pick_new_threads(
+        tweets,
+        set(old_ids),
+        TWITTER_USERNAME,
+        include_replies=TWITTER_INCLUDE_REPLIES,
+        include_retweets=TWITTER_INCLUDE_RETWEETS,
+    )
+
+    logger.info(
+        f"推文扫描完成：时间线 {len(tweets)} 条，待转发 {len(new_threads)} 组"
+        + (f"（含串推）" if any(len(th) > 1 for th in new_threads) else "")
+    )
+
+    if _bot_client is not None:
+        for thread in new_threads:
+            await _bot_client.send_tweet_notice(thread)
+            await asyncio.sleep(0.5)
+
+    twitter_state.save_seen_ids(
+        twitter_state.merge_seen(old_ids, fetched_ids),
+        username=TWITTER_USERNAME,
+    )
+
+
 def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -200,4 +260,13 @@ def create_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
         max_instances=1,
     )
+    if TWITTER_ENABLED and TWITTER_USERNAME:
+        scheduler.add_job(
+            scan_tweets_and_notify,
+            trigger="interval",
+            seconds=TWITTER_SCAN_INTERVAL,
+            id="twitter_scan",
+            replace_existing=True,
+            max_instances=1,
+        )
     return scheduler

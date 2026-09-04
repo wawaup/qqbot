@@ -3,6 +3,18 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from shop.models import Product
+    from twitter.models import Tweet
+
+
+def _price_sort_key(p: "Product") -> float:
+    try:
+        return float(p.price)
+    except (TypeError, ValueError):
+        return float("inf")
+
+
+def sort_by_price(items: list) -> list:
+    return sorted(items, key=_price_sort_key)
 
 
 def _price_label(p: "Product") -> str:
@@ -29,7 +41,7 @@ def format_product_menu(products: dict[str, "Product"]) -> str:
     parts = ["# 📋 商品清单"]
     for cat_name, items in by_category.items():
         block = [f"## {cat_name}"]
-        for i, p in enumerate(items, 1):
+        for i, p in enumerate(sort_by_price(items), 1):
             block.append(_item_line(i, p))
         parts.append("\n".join(block))
 
@@ -41,7 +53,9 @@ def filter_category_products(
     category_ids: list[int],
 ) -> list:
     id_set = set(category_ids)
-    return [p for p in products.values() if p.in_stock and p.category_id in id_set]
+    return sort_by_price(
+        [p for p in products.values() if p.in_stock and p.category_id in id_set]
+    )
 
 
 def format_category_products(items: list["Product"], label: str) -> str:
@@ -49,14 +63,14 @@ def format_category_products(items: list["Product"], label: str) -> str:
         return f"## 【{label}】\n\n暂时没有有货商品，补货时会通知～"
 
     lines = [f"# 【{label}】有货商品"]
-    for i, p in enumerate(items, 1):
+    for i, p in enumerate(sort_by_price(items), 1):
         lines.append(_item_line(i, p))
     return "\n".join(lines)
 
 
 def format_search_results(query: str, products: list["Product"]) -> str:
     lines = [f"# 🔍「{query}」有货商品"]
-    for i, p in enumerate(products, 1):
+    for i, p in enumerate(sort_by_price(products), 1):
         lines.append(_item_line(i, p))
     return "\n".join(lines)
 
@@ -108,3 +122,53 @@ def format_new_product_notice(products: list["Product"]) -> str:
     for p in products:
         lines.append(_notice_line(p))
     return "\n".join(lines)
+
+
+_TWEET_TEXT_LIMIT = 800
+_REPLY_TEXT_LIMIT = 400
+_QUOTE_TEXT_LIMIT = 200
+
+
+def _clip(text: str, limit: int) -> str:
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "…"
+
+
+def _quote_block(tweet: "Tweet") -> str | None:
+    if not tweet.quote_handle:
+        return None
+    quote = _clip(tweet.quote_text or "", _QUOTE_TEXT_LIMIT).replace("\n", "\n> ")
+    return f"> 引用 @{tweet.quote_handle}：\n> {quote}"
+
+
+def format_tweet_notice(
+    tweet: "Tweet",
+    display_name: str,
+    thread: list["Tweet"] | None = None,
+) -> str:
+    items = list(thread) if thread else [tweet]
+    root = items[0]
+    if root.is_retweet:
+        title = f"# 🔁 {display_name} 转发了 @{root.author_handle}"
+    else:
+        title = f"# 🐦 {display_name} 发推了"
+
+    parts = [title, "", _clip(root.text, _TWEET_TEXT_LIMIT) or "（无文字）"]
+    quote = _quote_block(root)
+    if quote:
+        parts.append(f"\n{quote}")
+
+    for reply in items[1:]:
+        parts.append("\n🧵 续")
+        parts.append(_clip(reply.text, _REPLY_TEXT_LIMIT) or "（无文字）")
+        reply_quote = _quote_block(reply)
+        if reply_quote:
+            parts.append(reply_quote)
+
+    if any(t.has_video for t in items):
+        parts.append("\n🎬 含视频，点链接查看")
+
+    parts.append(f"\n🔗 {root.url}")
+    return "\n".join(parts)

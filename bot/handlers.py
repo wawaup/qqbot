@@ -1,6 +1,7 @@
 """
 消息事件处理：@机器人指令 + 关键词自动回复。
 """
+import base64
 import json
 import logging
 import random
@@ -23,6 +24,7 @@ from bot.formatter import (
     format_product_detail,
     format_product_menu,
     format_search_results,
+    sort_by_price,
 )
 from config import BOT_OPENID, CATEGORY_COMMANDS_FILE, KEYWORDS_FILE, PICS_URLS
 from storage.state import load_state
@@ -79,12 +81,12 @@ HELP_TEXT = (
     "[https://chongzhi.website/tutorials](https://chongzhi.website/tutorials)\n"
     "> 并非鼓励反代，反代会增加封号概率，包括正价充值的号也可能被封；"
     "但以防有堆账号额度和学习相关步骤的需求，所以还是放上了\n\n"
-    "**链动小铺**：[https://pay.ldxp.cn/shop/manboup](https://pay.ldxp.cn/shop/manboup)\n"
+    "**链动小铺**：[https://wzyp.cn/shop/manboup](https://wzyp.cn/shop/manboup)\n"
     "**云猫小铺**：[https://catfk.com/shop/manbo](https://catfk.com/shop/manbo)\n\n"
     "---\n\n"
     "## 1️⃣ 按分类查看有货商品\n"
     "@我 + 分类关键词（每类举一例）：\n"
-    "`推荐`　`gpt`　`接码`　`claude`　`gemini`　`grok`　`邮箱`\n"
+    "`推荐`　`gpt`　`成品`　`接码`　`claude`　`gemini`　`grok`　`邮箱`\n"
     "同分类还有别的触发词，@我 + 相关词即可；想看全部分类？@我 + `清单`\n\n"
     "## 2️⃣ 搜索想要的商品\n"
     "@我 + 想找的东西，比如：`plus`　`有没有codex`　`想买个网页号`\n\n"
@@ -398,6 +400,7 @@ class BotHandlers(botpy.Client):
         await _reply_markdown(message, format_category_products(items, cmd))
 
     async def _send_search_results(self, message: GroupMessage, term: str, results: list):
+        results = sort_by_price(results)
         self._remember_shown(message, results)
         await _reply_markdown(message, format_search_results(term, results))
 
@@ -466,3 +469,61 @@ class BotHandlers(botpy.Client):
 
     async def send_daily_digest(self, events: list) -> None:
         await self._broadcast(format_daily_digest(events), "每日汇总", len(events))
+
+    async def _upload_group_image(self, group_openid: str, image_bytes: bytes):
+        """botpy 的 post_group_file 只接受 url，这里走 QQ 原生 file_data（base64）上传。
+
+        推文图在 pbs.twimg.com，腾讯服务器在国内拉不到，必须由本机先下再传。
+        """
+        from botpy.http import Route
+
+        payload = {
+            "file_type": 1,
+            "file_data": base64.b64encode(image_bytes).decode("ascii"),
+            "srv_send_msg": False,
+        }
+        route = Route("POST", "/v2/groups/{group_openid}/files", group_openid=group_openid)
+        return await self.api._http.request(route, json=payload)
+
+    async def send_tweet_notice(self, thread) -> None:
+        from bot.formatter import format_tweet_notice
+        from config import GROUP_OPENIDS, TWITTER_DISPLAY_NAME
+        from twitter.fetcher import collect_photos, download_images
+
+        if not isinstance(thread, list):
+            thread = [thread]
+        if not thread:
+            return
+        root = thread[0]
+
+        if not GROUP_OPENIDS:
+            logger.warning("GROUP_OPENIDS 未配置，无法转发推文")
+            return
+
+        text = format_tweet_notice(root, TWITTER_DISPLAY_NAME, thread=thread)
+        image_bytes = await download_images(collect_photos(thread))
+
+        for group_openid in GROUP_OPENIDS:
+            try:
+                await self.api.post_group_message(
+                    group_openid=group_openid,
+                    msg_type=2,
+                    markdown=msg_types.MarkdownPayload(content=text),
+                )
+            except Exception as e:
+                logger.error(f"[{group_openid}] 推文文字发送失败 {root.id}: {e}")
+                continue
+            for img in image_bytes:
+                try:
+                    media = await self._upload_group_image(group_openid, img)
+                    await self.api.post_group_message(
+                        group_openid=group_openid,
+                        msg_type=7,
+                        media=media,
+                    )
+                except Exception as e:
+                    logger.warning(f"[{group_openid}] 推文图片发送失败 {root.id}: {e}")
+            logger.info(
+                f"[{group_openid}] 推文已转发：{root.id}"
+                + (f" +{len(thread) - 1}条续帖" if len(thread) > 1 else "")
+            )

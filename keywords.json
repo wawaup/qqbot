@@ -1,7 +1,7 @@
 [
   {
     "keywords": ["店铺链接", "店铺地址", "购买链接", "在哪买", "哪里买"],
-    "reply": "## 店铺链接\n\n**导购站：** [https://chongzhi.website/](https://chongzhi.website/)\n\n**链动小铺** — 货品全，含所有 AI 品类以及 GPT 成品号：\n[https://pay.ldxp.cn/shop/manboup](https://pay.ldxp.cn/shop/manboup)\n\n**云猫小铺** — GPT 官方充值，手续费比链动低，支持代理分销：\n[https://catfk.com/shop/manbo](https://catfk.com/shop/manbo)\n\n访问不了换节点",
+    "reply": "## 店铺链接\n\n**导购站：** [https://chongzhi.website/](https://chongzhi.website/)\n\n**链动小铺** — 货品全，含所有 AI 品类以及 GPT 成品号：\n[https://wzyp.cn/shop/manboup](https://wzyp.cn/shop/manboup)\n\n**云猫小铺** — GPT 官方充值，手续费比链动低，支持代理分销：\n[https://catfk.com/shop/manbo](https://catfk.com/shop/manbo)\n\n访问不了换节点",
     "image": "pics/展开商品说明.png"
   },
   {
@@ -11,7 +11,7 @@
   },
   {
     "keywords": ["哪里查订单", "订单找不到了", "订单查询", "订单详情", "订单卡密"],
-    "reply": "## 订单查询\n\n**链动：** [https://pay.ldxp.cn/order](https://pay.ldxp.cn/order)\n\n**云猫：** [https://catfk.com/order](https://catfk.com/order)\n\n### 安全密码与卡密保管\n\n部分订单需设置安全密码，请设置为稍微复杂又便于个人记忆的密码，防止被盗卡密。\n\n下单后，请将安全密码、卡密和账号信息登录方式保存在自身设备安全且易于查找的位置。最简单的方式是发送至 QQ 或微信自己的账号聊天框。\n\n请妥善保存：时间较长后若商品下架，可能无法找回卡密。",
+    "reply": "## 订单查询\n\n**链动：** [https://wzyp.cn/order](https://wzyp.cn/order)\n\n**云猫：** [https://catfk.com/order](https://catfk.com/order)\n\n### 安全密码与卡密保管\n\n部分订单需设置安全密码，请设置为稍微复杂又便于个人记忆的密码，防止被盗卡密。\n\n下单后，请将安全密码、卡密和账号信息登录方式保存在自身设备安全且易于查找的位置。最简单的方式是发送至 QQ 或微信自己的账号聊天框。\n\n请妥善保存：时间较长后若商品下架，可能无法找回卡密。",
     "image": "pics/meme1.jpg"
   },
   {

@@ -1,0 +1,134 @@
+{
+  "code": 200,
+  "results": [
+    {
+      "type": "status",
+      "id": "2095706521854513424",
+      "url": "https://x.com/wawaup1024/status/2095706521854513424",
+      "text": "在 astra 没上线之前每天一个 bankreset，接下来的几天会很疯狂，没有账号的可以赶紧创建了。\n#chatGPT #OpenAI #gpt #codex #astra",
+      "created_at": "Fri Sep 04 02:52:25 +0000 2026",
+      "created_timestamp": 1788490345,
+      "author": {
+        "screen_name": "wawaup1024",
+        "name": "曼波波波"
+      },
+      "replying_to": null,
+      "reposted_by": null,
+      "media": {
+        "photos": [
+          {
+            "type": "photo",
+            "id": "2095706516276064256",
+            "url": "https://pbs.twimg.com/media/HRVx-RgbMAANZyF.jpg?name=orig"
+          }
+        ]
+      },
+      "quote": null
+    },
+    {
+      "type": "status",
+      "id": "2095740814685356278",
+      "url": "https://x.com/wawaup1024/status/2095740814685356278",
+      "text": "本次羊毛的最佳实践：\n1. 先开Plus，锁定重置卡，Astra发布后再升级到Pro，用量大的可以先多开几个Plus；\n2. 自然重置后的1-2天把额度全部蹬完，马上使用重置卡。因为Codex是重置日期，不是重置额度。",
+      "created_at": "Fri Sep 04 05:08:41 +0000 2026",
+      "created_timestamp": 1788498521,
+      "author": {
+        "screen_name": "wawaup1024",
+        "name": "曼波波波"
+      },
+      "replying_to": {
+        "screen_name": "wawaup1024",
+        "status": "2095706521854513424",
+        "url": "https://x.com/wawaup1024/status/2095706521854513424",
+        "profile_url": "https://x.com/wawaup1024"
+      },
+      "reposted_by": null,
+      "media": {},
+      "quote": null
+    },
+    {
+      "type": "status",
+      "id": "2095751662799568973",
+      "url": "https://x.com/wawaup1024/status/2095751662799568973",
+      "text": "还真是，这就是为什么每次新模型发布之前，大家发现手上即使是最高档的 GPT 老模型都貌似听不懂人话了。我之前甚至想他们是不是故意调了推理参数，但实则是更明显的阳谋，自动给你的回答模型换成了 5.5 和 5.4 的 mini。OpenAI 别看天天重置，他们账算的老精了，因为新模型价格必然高，隐形的在砍额度，用户最多的低档 plus 会员加上 5h 窗口即使天天重置也花不了多少 token。",
+      "created_at": "Fri Sep 04 05:51:48 +0000 2026",
+      "created_timestamp": 1788501108,
+      "author": {
+        "screen_name": "wawaup1024",
+        "name": "曼波波波"
+      },
+      "replying_to": null,
+      "reposted_by": null,
+      "media": {},
+      "quote": {
+        "type": "status",
+        "id": "2095629561333694627",
+        "text": "GPT 6 Astra is out.\n\nWill be like talking to a god.\n\n1 week later will be like talking to an autistic toddler with down syndrome to reduce compute\n\n2 weeks later it will be about 20% better than GPT 5.6 Sol after customer complaints, and raising it up slightly.\n\n3 weeks later we will start hearing about how amazing GPT 6.1 is about to be.\n\n4 weeks later GPT 6 will be 5% above gpt 5.6 Sol\n\n5 Weeks later GPT 6.1 will release... rinse and repeat",
+        "author": {
+          "screen_name": "Abomination81",
+          "name": "Abomination"
+        },
+        "media": {}
+      }
+    },
+    {
+      "type": "status",
+      "id": "2095217830711198073",
+      "url": "https://x.com/MaxForAI/status/2095217830711198073",
+      "text": "卧槽，Fable5.1太夸张了。。。。\n\n这次直接把 Code Arena 打出断层了。\n\nhttp://Arena.ai 刚更新 WebDev 榜单：Claude Fable 5.1 (Max) 以 1765 分登顶，领先第二名 Qwen3.8-Max-0902 整整 77 分。\n\n最夸张的是，上一代 Fable 5 只有 1628 分，排第 8。\n\n也就是说一次 5.1 更新，直接涨了 137 分，从第八冲到断层第一。\n\nAnthropic 官方发布时就称 Fable 5.1 是目前最强的 coding 和 knowledge work 模型，现在 Code Arena 的真人投票也开始给出非常明显的反馈。\n\n而且这代还把 Cache Read 价格砍了 75%，Anthropic 称高 Agentic workload 的实际成本最多能下降约 45%。\n\n这波看下来，Fable 5.1 可能比发布会 Benchmark 表格里体现出来的提升还要大。",
+      "created_at": "Wed Sep 02 18:30:32 +0000 2026",
+      "created_timestamp": 1788373832,
+      "author": {
+        "screen_name": "MaxForAI",
+        "name": "Max For AI"
+      },
+      "replying_to": null,
+      "reposted_by": {
+        "id": "1701261306438074368",
+        "name": "曼波波波",
+        "screen_name": "wawaup1024",
+        "avatar_url": "https://pbs.twimg.com/profile_images/2059584656862007296/S6uImw1B_200x200.jpg",
+        "url": "https://x.com/wawaup1024"
+      },
+      "media": {
+        "photos": [
+          {
+            "type": "photo",
+            "id": "2095217807436976128",
+            "url": "https://pbs.twimg.com/media/HRO1frNakAAYRoi.jpg?name=orig"
+          }
+        ]
+      },
+      "quote": {
+        "type": "status",
+        "id": "2095194515984585171",
+        "text": "Big news: Fable 5.1 (Max) by @AnthropicAI just landed #1 in the Code Arena: WebDev with 1765 pts - breaking away from the pack with a huge +77pt margin.\n\nFable 5.1 (Max) is a significant improvement from Fable 5 (Max) at #8 overall with 1628 pts. It’s +77 pts above Qwen3.8-Max-0902 in the #2 spot, and +78 pts above Opus 5 (Max) in the #3 spot.\n\nWith 1765 pts and a blended $40/MToken, it also reshapes the Pareto frontier in the higher priced range by moving the performance bar much higher. See Pareto below.\n\nCongrats to the @AnthropicAI team on this release!",
+        "author": {
+          "screen_name": "arena",
+          "name": "Arena.ai"
+        },
+        "media": {}
+      }
+    },
+    {
+      "type": "status",
+      "id": "9999999999999999999",
+      "url": "https://x.com/wawaup1024/status/9999999999999999999",
+      "text": "回复别人的帖子",
+      "created_at": "Fri Sep 04 05:08:41 +0000 2026",
+      "created_timestamp": 1788498521,
+      "author": {
+        "screen_name": "wawaup1024",
+        "name": "曼波波波"
+      },
+      "replying_to": {
+        "screen_name": "someone_else",
+        "status": "1",
+        "url": "https://x.com/someone_else/status/1"
+      },
+      "reposted_by": null,
+      "media": {},
+      "quote": null
+    }
+  ]
+}

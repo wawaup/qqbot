@@ -4,7 +4,7 @@
 
 ## 项目简介
 
-QQ 群机器人，监控 `pay.ldxp.cn/shop/manboup` 的商品库存变化，自动发新品/上架/补货通知，支持 @指令查询商品、关键词自动回复等功能。
+QQ 群机器人，监控 `wzyp.cn/shop/manboup` 的商品库存变化，自动发新品/上架/补货通知；定时拉取 Twitter（默认 `@wawaup1024`）新帖并连同文字、图片转发到群；支持 @指令查询商品、关键词自动回复等功能。
 
 ## 常用命令
 
@@ -19,8 +19,14 @@ uv run python -m shop.scraper --debug
 # 验证爬虫正常工作
 uv run python -m shop.scraper
 
+# 验证 Twitter 时间线能否拉取（国内机器通常要先配 TWITTER_HTTP_PROXY）
+uv run python -m twitter.fetcher
+
 # 启动机器人
 uv run python main.py
+
+# 跑测试
+uv run pytest
 ```
 
 ## 项目结构
@@ -37,8 +43,12 @@ qqbot/
 │   └── formatter.py         # 消息文本格式化
 ├── scheduler/
 │   └── tasks.py             # APScheduler 定时扫描 + 通知调度
+├── twitter/
+│   ├── models.py            # Tweet 数据类
+│   └── fetcher.py           # FxTwitter 时间线拉取 + 图片下载
 ├── storage/
-│   └── state.py             # state.json 快照管理（合并式），diff_states() 检测新品/上架/补货
+│   ├── state.py             # state.json 快照管理（合并式），diff_states() 检测新品/上架/补货
+│   └── twitter_state.py     # twitter_state.json，记录已处理的 tweet id
 ├── keywords.json            # 关键词→回复 配置（支持 reply 单条或 replies 数组随机）
 ├── category_commands.json   # 分类指令→分类 id 映射
 └── pics/                    # 回复附带的图片
@@ -52,10 +62,17 @@ qqbot/
 | `BOT_SECRET` | QQ 开放平台 Secret | 必填 |
 | `GROUP_OPENIDS` | 目标群 openid，逗号分隔多群 | 必填 |
 | `BOT_OPENID` | 机器人自身的 member openid（过滤自@） | 必填 |
-| `SHOP_URL` | 店铺地址 | `https://pay.ldxp.cn/shop/manboup` |
+| `SHOP_URL` | 店铺地址 | `https://wzyp.cn/shop/manboup` |
 | `SCAN_INTERVAL` | 爬虫扫描间隔（秒） | `60` |
 | `SANDBOX` | 沙盒模式，不真实发消息 | `false` |
 | `NOTIFY_COOLDOWN` | 同一商品通知冷却（秒），覆盖新品/上架/补货三种事件 | `900`（15 分钟） |
+| `TWITTER_ENABLED` | 是否开启 Twitter 新帖转发 | `true` |
+| `TWITTER_USERNAME` | 要监控的 X 用户名（不含 `@`） | `wawaup1024` |
+| `TWITTER_DISPLAY_NAME` | 群通知里显示的名字 | `曼波波波` |
+| `TWITTER_SCAN_INTERVAL` | 拉推间隔（秒） | `1800`（30 分钟） |
+| `TWITTER_HTTP_PROXY` | 访问 FxTwitter / 推文图的 HTTP 代理 | 空 |
+| `TWITTER_INCLUDE_RETWEETS` | 是否转发转推 | `true` |
+| `TWITTER_INCLUDE_REPLIES` | 是否转发回复别人的帖（自己的串推始终转发） | `false` |
 
 ## 功能说明
 
@@ -120,6 +137,17 @@ qqbot/
 
 每条触发消息最多可发 5 条回复（`msg_seq` 计数器，按 `msg_id` 追踪）。
 
+### 6. Twitter 新帖转发
+
+- 每 `TWITTER_SCAN_INTERVAL` 秒请求一次 [FxTwitter](https://api.fxtwitter.com) 公开接口 `GET /2/profile/{handle}/statuses`，无需官方 API Key
+- 启动时 `first_run=True` 只把当前时间线上的 id 记进 `twitter_state.json`，不转发，避免把历史帖刷到群里
+- 之后出现新 id 才发群：先 Markdown 文字（含原文、引用、链接），再逐张发图片（最多 4 张）
+- 推文图在 `pbs.twimg.com`，QQ 侧拉不到，所以由机器人本机下载后走 `file_data`（base64）上传
+- **默认转发**：原创、引用、转推；回复自己的帖会跟原帖合成一条（带「🧵 续」）发出；**默认不转发**回复别人的帖
+- 不受店铺 00:00–09:00 静默时段影响（发推频率低，且多是主动公告）
+- 国内阿里云访问 X / FxTwitter / `pbs.twimg.com` 通常被墙，需要在 `.env` 配 `TWITTER_HTTP_PROXY`（只代理推特流量，不影响店铺接口）
+- 视频帖发文字 + 封面图（若有），并提示点链接看视频
+
 ## 架构关键点
 
 - **爬虫**：页面有 WAF，使用 Playwright 无头 Chromium 渲染。`SELECTORS` 字典在 `shop/scraper.py` 顶部，页面改版只改这里。`--debug` 保存 `debug_shop.html`。
@@ -127,6 +155,7 @@ qqbot/
 - **Bot 依赖注入**：`scheduler/tasks.py` 的 `_bot_client` 由 `main.py` 通过 `set_bot_client()` 注入，避免循环导入。
 - **关键词缓存**：`keywords.json` 和 `category_commands.json` 首次访问后缓存在内存，重启生效。
 - **jieba 预热**：`handlers.py` import 时调用 `jieba.initialize()`，避免首次查询阻塞事件循环。
+- **推文已读**：`twitter_state.json` 保存已处理的 tweet id（最多 300 条），重启后不会把旧帖再发一遍。
 
 ## 首次配置步骤
 

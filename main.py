@@ -12,7 +12,7 @@ import botpy
 
 from bot.handlers import BotHandlers
 from config import BOT_APPID, BOT_SECRET, SANDBOX
-from scheduler.tasks import create_scheduler, scan_and_notify, set_bot_client
+from scheduler.tasks import create_scheduler, scan_and_notify, scan_tweets_and_notify, set_bot_client
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,11 @@ class App(BotHandlers):
         if not App._initialized:
             App._initialized = True
             _scheduler.start()
-            logger.info(f"定时扫描已启动，间隔 {__import__('config').SCAN_INTERVAL} 秒")
+            from config import SCAN_INTERVAL, TWITTER_ENABLED, TWITTER_SCAN_INTERVAL
+            extra = f"，推文间隔 {TWITTER_SCAN_INTERVAL} 秒" if TWITTER_ENABLED else ""
+            logger.info(f"定时扫描已启动，商店间隔 {SCAN_INTERVAL} 秒{extra}")
             await scan_and_notify(first_run=True)
+            await scan_tweets_and_notify(first_run=True)
         else:
             logger.info("重连成功，调度器继续运行")
 
