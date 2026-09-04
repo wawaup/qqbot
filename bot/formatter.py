@@ -1,4 +1,6 @@
 from collections import defaultdict
+from datetime import datetime, timedelta, timezone
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -128,6 +130,9 @@ _TWEET_TEXT_LIMIT = 800
 _REPLY_TEXT_LIMIT = 400
 _QUOTE_TEXT_LIMIT = 200
 
+_HASHTAG_RE = re.compile(r"#[^\s#]+")
+_CST = timezone(timedelta(hours=8))
+
 
 def _clip(text: str, limit: int) -> str:
     text = (text or "").strip()
@@ -136,10 +141,34 @@ def _clip(text: str, limit: int) -> str:
     return text[:limit].rstrip() + "…"
 
 
+def _strip_hashtags(text: str) -> str:
+    """去掉 #tag，避免 QQ Markdown 把它们当成标题。"""
+    text = _HASHTAG_RE.sub("", text or "")
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r" {2,}", " ", text)
+    return text.strip()
+
+
+def _format_tweet_time(ts: int) -> str:
+    if not ts:
+        return ""
+    dt = datetime.fromtimestamp(ts, _CST)
+    return f"{dt.year}年{dt.month}月{dt.day}日 {dt.hour:02d}:{dt.minute:02d}"
+
+
+def _heading(label: str, ts: int = 0) -> str:
+    """emoji 小标题加粗，时间不加粗。"""
+    time_str = _format_tweet_time(ts)
+    if time_str:
+        return f"**{label}** {time_str}"
+    return f"**{label}**"
+
+
 def _quote_block(tweet: "Tweet") -> str | None:
     if not tweet.quote_handle:
         return None
-    quote = _clip(tweet.quote_text or "", _QUOTE_TEXT_LIMIT).replace("\n", "\n> ")
+    quote = _clip(_strip_hashtags(tweet.quote_text or ""), _QUOTE_TEXT_LIMIT).replace("\n", "\n> ")
     return f"> 引用 @{tweet.quote_handle}：\n> {quote}"
 
 
@@ -151,24 +180,28 @@ def format_tweet_notice(
     items = list(thread) if thread else [tweet]
     root = items[0]
     if root.is_retweet:
-        title = f"# 🔁 {display_name} 转发了 @{root.author_handle}"
+        title = _heading(f"🔁 转发了 @{root.author_handle}", root.created_timestamp)
     else:
-        title = f"# 🐦 {display_name} 发推了"
+        title = _heading(f"🌐 {display_name}", root.created_timestamp)
 
-    parts = [title, "", _clip(root.text, _TWEET_TEXT_LIMIT) or "（无文字）"]
+    body = _clip(_strip_hashtags(root.text), _TWEET_TEXT_LIMIT) or "（无文字）"
+    parts = [title, "", body]
     quote = _quote_block(root)
     if quote:
         parts.append(f"\n{quote}")
 
     for reply in items[1:]:
-        parts.append("\n🧵 续")
-        parts.append(_clip(reply.text, _REPLY_TEXT_LIMIT) or "（无文字）")
+        parts.append("")
+        parts.append(_heading("💬 追加评论", reply.created_timestamp))
+        parts.append(_clip(_strip_hashtags(reply.text), _REPLY_TEXT_LIMIT) or "（无文字）")
         reply_quote = _quote_block(reply)
         if reply_quote:
             parts.append(reply_quote)
 
-    if any(t.has_video for t in items):
+    if root.has_video:
         parts.append("\n🎬 含视频，点链接查看")
 
-    parts.append(f"\n🔗 {root.url}")
+    parts.append("")
+    parts.append(_heading("🔗 原贴链接"))
+    parts.append(root.url)
     return "\n".join(parts)

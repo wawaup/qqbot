@@ -68,8 +68,8 @@ qqbot/
 | `NOTIFY_COOLDOWN` | 同一商品通知冷却（秒），覆盖新品/上架/补货三种事件 | `900`（15 分钟） |
 | `TWITTER_ENABLED` | 是否开启 Twitter 新帖转发 | `true` |
 | `TWITTER_USERNAME` | 要监控的 X 用户名（不含 `@`） | `wawaup1024` |
-| `TWITTER_DISPLAY_NAME` | 群通知里显示的名字 | `曼波波波` |
-| `TWITTER_SCAN_INTERVAL` | 拉推间隔（秒） | `1800`（30 分钟） |
+| `TWITTER_DISPLAY_NAME` | 群通知里显示的名字 | `曼波小店资讯` |
+| `TWITTER_SCAN_INTERVAL` | 拉推间隔（秒） | `900`（15 分钟） |
 | `TWITTER_HTTP_PROXY` | 访问 FxTwitter / 推文图的 HTTP 代理 | 空 |
 | `TWITTER_INCLUDE_RETWEETS` | 是否转发转推 | `true` |
 | `TWITTER_INCLUDE_REPLIES` | 是否转发回复别人的帖（自己的串推始终转发） | `false` |
@@ -143,7 +143,8 @@ qqbot/
 - 启动时 `first_run=True` 只把当前时间线上的 id 记进 `twitter_state.json`，不转发，避免把历史帖刷到群里
 - 之后出现新 id 才发群：先 Markdown 文字（含原文、引用、链接），再逐张发图片（最多 4 张）
 - 推文图在 `pbs.twimg.com`，QQ 侧拉不到，所以由机器人本机下载后走 `file_data`（base64）上传
-- **默认转发**：原创、引用、转推；回复自己的帖会跟原帖合成一条（带「🧵 续」）发出；**默认不转发**回复别人的帖
+- **默认转发**：原创、引用、转推；回复自己的帖会跟原帖合成一条（带「💬 追加评论」和时间）发出；**默认不转发**回复别人的帖
+- 只发原帖正文图片，不带评论里的图；正文里的 `#tag` 会去掉，避免 QQ Markdown 当成标题
 - 不受店铺 00:00–09:00 静默时段影响（发推频率低，且多是主动公告）
 - 国内阿里云访问 X / FxTwitter / `pbs.twimg.com` 通常被墙，需要在 `.env` 配 `TWITTER_HTTP_PROXY`（只代理推特流量，不影响店铺接口）
 - 视频帖发文字 + 封面图（若有），并提示点链接看视频

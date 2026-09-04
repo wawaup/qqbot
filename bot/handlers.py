@@ -501,7 +501,8 @@ class BotHandlers(botpy.Client):
             return
 
         text = format_tweet_notice(root, TWITTER_DISPLAY_NAME, thread=thread)
-        image_bytes = await download_images(collect_photos(thread))
+        # 只发原帖正文图，不带评论/引用里的图
+        image_bytes = await download_images(collect_photos([root]))
 
         for group_openid in GROUP_OPENIDS:
             try:
@@ -525,5 +526,5 @@ class BotHandlers(botpy.Client):
                     logger.warning(f"[{group_openid}] 推文图片发送失败 {root.id}: {e}")
             logger.info(
                 f"[{group_openid}] 推文已转发：{root.id}"
-                + (f" +{len(thread) - 1}条续帖" if len(thread) > 1 else "")
+                + (f" +{len(thread) - 1}条评论" if len(thread) > 1 else "")
             )

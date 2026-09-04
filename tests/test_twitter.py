@@ -51,10 +51,17 @@ def test_self_replies_grouped_with_parent(tweets):
         "2095706521854513424",
         "2095740814685356278",
     ]
-    text = format_tweet_notice(bundled[0], "曼波波波", thread=bundled)
+    text = format_tweet_notice(bundled[0], "曼波小店资讯", thread=bundled)
     assert "bankreset" in text
-    assert "🧵 续" in text
+    assert "#chatGPT" not in text
+    assert "🧵 续" not in text
+    assert "**💬 追加评论**" in text
     assert "本次羊毛的最佳实践" in text
+    assert text.startswith("**🌐 曼波小店资讯** 2026年9月4日 10:52")
+    assert "**💬 追加评论** 2026年9月4日 13:08" in text
+    assert "**🔗 原贴链接**" in text
+    # 加粗只包小标题，时间在加粗标记外面
+    assert "**🌐 曼波小店资讯 2026年9月4日 10:52**" not in text
 
     new = pick_new_threads(
         tweets,
@@ -91,17 +98,19 @@ def test_quote_fields(tweets):
     t = _by_id(tweets)["2095751662799568973"]
     assert t.quote_handle == "Abomination81"
     assert "GPT 6 Astra" in (t.quote_text or "")
-    text = format_tweet_notice(t, "曼波波波")
-    assert text.startswith("# 🐦 曼波波波 发推了")
+    text = format_tweet_notice(t, "曼波小店资讯")
+    assert text.startswith("**🌐 曼波小店资讯**")
     assert "引用 @Abomination81" in text
     assert t.url in text
+    assert not text.startswith("#")
 
 
 def test_format_retweet(tweets):
     t = _by_id(tweets)["2095217830711198073"]
-    text = format_tweet_notice(t, "曼波波波")
-    assert text.startswith("# 🔁 曼波波波 转发了 @MaxForAI")
+    text = format_tweet_notice(t, "曼波小店资讯")
+    assert text.startswith("**🔁 转发了 @MaxForAI**")
     assert t.url in text
+    assert "**🔗 原贴链接**" in text
 
 
 def test_pick_new_tweets_oldest_first(tweets):

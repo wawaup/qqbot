@@ -28,8 +28,8 @@ NOTIFY_COOLDOWN: int = int(os.getenv("NOTIFY_COOLDOWN", "900"))
 # Twitter / X 新帖转发
 TWITTER_ENABLED = os.getenv("TWITTER_ENABLED", "true").lower() == "true"
 TWITTER_USERNAME = os.getenv("TWITTER_USERNAME", "wawaup1024").lstrip("@")
-TWITTER_DISPLAY_NAME = os.getenv("TWITTER_DISPLAY_NAME", "曼波波波")
-TWITTER_SCAN_INTERVAL = int(os.getenv("TWITTER_SCAN_INTERVAL", "1800"))  # 默认 30 分钟
+TWITTER_DISPLAY_NAME = os.getenv("TWITTER_DISPLAY_NAME", "曼波小店资讯")
+TWITTER_SCAN_INTERVAL = int(os.getenv("TWITTER_SCAN_INTERVAL", "900"))  # 默认 15 分钟
 TWITTER_API_BASE = os.getenv("TWITTER_API_BASE", "https://api.fxtwitter.com")
 TWITTER_HTTP_PROXY = os.getenv("TWITTER_HTTP_PROXY", "")  # 国内服务器访问 X 需要代理，如 http://127.0.0.1:7890
 TWITTER_INCLUDE_RETWEETS = os.getenv("TWITTER_INCLUDE_RETWEETS", "true").lower() == "true"

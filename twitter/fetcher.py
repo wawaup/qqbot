@@ -87,27 +87,16 @@ def parse_status(item: dict) -> Tweet | None:
     quote = item.get("quote")
     quote_handle = None
     quote_text = None
-    quote_photos: list[str] = []
-    quote_has_video = False
-    quote_thumb = ""
     if isinstance(quote, dict) and quote.get("type") == "status":
         q_author = quote.get("author") or {}
         quote_handle = q_author.get("screen_name") or None
         quote_text = quote.get("text") or None
-        q_media = quote.get("media") or {}
-        if isinstance(q_media, dict):
-            quote_photos = _photo_urls(q_media)
-            quote_has_video, quote_thumb = _video_info(q_media)
 
     media = item.get("media") or {}
     photos = _photo_urls(media) if isinstance(media, dict) else []
     has_video, video_thumb = _video_info(media) if isinstance(media, dict) else (False, "")
-    photos.extend(quote_photos)
-    if quote_has_video:
-        has_video = True
-        video_thumb = video_thumb or quote_thumb
 
-    # 去重并最多留 4 张（QQ 主动消息条数有限：1 条文字 + 最多 4 张图）
+    # 只保留正文自己的图，不带引用推、评论里的图
     seen: set[str] = set()
     unique_photos: list[str] = []
     for url in photos:
@@ -227,7 +216,7 @@ def pick_new_threads(
 
 
 def collect_photos(tweets: list[Tweet], limit: int = 4) -> list[str]:
-    """整串推的图片按时间拼在一起，最多 limit 张。"""
+    """只取传入推文的正文图，最多 limit 张。"""
     urls: list[str] = []
     seen: set[str] = set()
     for t in tweets:
