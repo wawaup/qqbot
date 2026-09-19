@@ -22,6 +22,9 @@ uv run python -m shop.scraper
 # 验证 Twitter 时间线能否拉取（国内机器通常要先配 TWITTER_HTTP_PROXY）
 uv run python -m twitter.fetcher
 
+# 预览哪些帖会因主题过滤被跳过
+uv run python -m twitter.fetcher --filter
+
 # 启动机器人
 uv run python main.py
 
@@ -46,6 +49,7 @@ qqbot/
 ├── twitter/
 │   ├── models.py            # Tweet 数据类
 │   └── fetcher.py           # FxTwitter 时间线拉取 + 图片下载
+├── twitter_topics.json      # 推文转发主题白名单（AI/科技关键词）
 ├── storage/
 │   ├── state.py             # state.json 快照管理（合并式），diff_states() 检测新品/上架/补货
 │   └── twitter_state.py     # twitter_state.json，记录已处理的 tweet id
@@ -73,6 +77,7 @@ qqbot/
 | `TWITTER_HTTP_PROXY` | 访问 FxTwitter / 推文图的 HTTP 代理 | 空 |
 | `TWITTER_INCLUDE_RETWEETS` | 是否转发转推 | `true` |
 | `TWITTER_INCLUDE_REPLIES` | 是否转发回复别人的帖（自己的串推始终转发） | `false` |
+| `TWITTER_TOPIC_FILTER` | 是否只转发 AI/科技相关帖 | `true` |
 
 ## 功能说明
 
@@ -144,6 +149,7 @@ qqbot/
 - 之后出现新 id 才发群：先 Markdown 文字（含原文、引用、链接），再逐张发图片（最多 4 张）
 - 推文图在 `pbs.twimg.com`，QQ 侧拉不到，所以由机器人本机下载后走 `file_data`（base64）上传
 - **默认转发**：原创、引用、转推；回复自己的帖会跟原帖合成一条（带「💬 追加评论」和时间）发出；**默认不转发**回复别人的帖
+- **主题过滤**：`TWITTER_TOPIC_FILTER=true` 时，原帖/评论/引用里至少命中 `twitter_topics.json` 一个关键词才转发，日常唠嗑跳过但仍记入已读；改词表后重启生效
 - 只发原帖正文图片，不带评论里的图；正文里的 `#tag` 会去掉，避免 QQ Markdown 当成标题
 - 不受店铺 00:00–09:00 静默时段影响（发推频率低，且多是主动公告）
 - 国内阿里云访问 X / FxTwitter / `pbs.twimg.com` 通常被墙，需要在 `.env` 配 `TWITTER_HTTP_PROXY`（只代理推特流量，不影响店铺接口）
@@ -154,7 +160,7 @@ qqbot/
 - **爬虫**：页面有 WAF，使用 Playwright 无头 Chromium 渲染。`SELECTORS` 字典在 `shop/scraper.py` 顶部，页面改版只改这里。`--debug` 保存 `debug_shop.html`。
 - **库存快照**：`state.json` 保存上次扫描结果，合并式更新（下架商品保留记录、仅标记 `listed=False`，不删除），`diff_states()` 基于此做新品/上架/补货三态判定。
 - **Bot 依赖注入**：`scheduler/tasks.py` 的 `_bot_client` 由 `main.py` 通过 `set_bot_client()` 注入，避免循环导入。
-- **关键词缓存**：`keywords.json` 和 `category_commands.json` 首次访问后缓存在内存，重启生效。
+- **关键词缓存**：`keywords.json`、`category_commands.json` 和 `twitter_topics.json` 首次访问后缓存在内存，重启生效。
 - **jieba 预热**：`handlers.py` import 时调用 `jieba.initialize()`，避免首次查询阻塞事件循环。
 - **推文已读**：`twitter_state.json` 保存已处理的 tweet id（最多 300 条），重启后不会把旧帖再发一遍。
 

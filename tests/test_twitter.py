@@ -4,7 +4,15 @@ import pytest
 
 from bot.formatter import format_tweet_notice
 from storage import twitter_state
-from twitter.fetcher import group_threads, parse_timeline, pick_new_threads, pick_new_tweets, should_forward
+from twitter.fetcher import (
+    group_threads,
+    parse_timeline,
+    pick_new_threads,
+    pick_new_tweets,
+    should_forward,
+    thread_matches_topics,
+)
+from twitter.models import Tweet
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_statuses.json"
 
@@ -128,3 +136,52 @@ def test_merge_and_persist_seen_ids(tmp_path, monkeypatch):
     assert merged[:3] == ["new1", "keep", "old1"]
     twitter_state.save_seen_ids(merged, username=USERNAME)
     assert twitter_state.load_seen_ids() == ["new1", "keep", "old1"]
+
+
+def test_topic_filter_keeps_ai_skips_chatter():
+    keywords = ["gpt", "claude"]
+    ai = Tweet(
+        id="1", url="https://x.com/x/status/1", text="GPT-6 Astra 来了",
+        created_timestamp=1, author_handle="wawaup1024", author_name="x",
+    )
+    chat = Tweet(
+        id="2", url="https://x.com/x/status/2", text="今天吃了火锅心情不错",
+        created_timestamp=2, author_handle="wawaup1024", author_name="x",
+    )
+    via_comment = Tweet(
+        id="3", url="https://x.com/x/status/3", text="看评论",
+        created_timestamp=3, author_handle="wawaup1024", author_name="x",
+    )
+    comment = Tweet(
+        id="4", url="https://x.com/x/status/4", text="claude 有货了",
+        created_timestamp=4, author_handle="wawaup1024", author_name="x",
+        is_reply=True, reply_to_handle="wawaup1024", reply_to_id="3",
+    )
+    assert thread_matches_topics([ai], keywords)
+    assert not thread_matches_topics([chat], keywords)
+    assert thread_matches_topics([via_comment, comment], keywords)
+    stock = Tweet(
+        id="5", url="https://x.com/x/status/5", text="iOS20x 有货，库存有限",
+        created_timestamp=5, author_handle="wawaup1024", author_name="x",
+    )
+    assert thread_matches_topics([stock], ["有货", "库存", "ios20x"])
+
+    kept = pick_new_threads(
+        [ai, chat, via_comment, comment],
+        seen_ids=set(),
+        username=USERNAME,
+        include_replies=False,
+        include_retweets=True,
+        topic_keywords=keywords,
+    )
+    assert [th[0].id for th in kept] == ["1", "3"]
+
+
+def test_topics_file_covers_companies_and_shop_names():
+    import json
+    from pathlib import Path
+
+    data = json.loads(Path("twitter_topics.json").read_text(encoding="utf-8"))
+    kws = {x.lower() for x in data["keywords"]}
+    for word in ("openai", "anthropic", "google", "microsoft", "有货", "cursor", "kiro", "接马", "反代"):
+        assert word in kws

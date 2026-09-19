@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import sys
+from pathlib import Path
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 import httpx
@@ -18,6 +19,8 @@ import httpx
 from twitter.models import Tweet
 
 logger = logging.getLogger(__name__)
+
+_topic_keywords_cache: list[str] | None = None
 
 _UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -146,6 +149,32 @@ def is_self_reply(tweet: Tweet, username: str) -> bool:
     return tweet.is_reply and (tweet.reply_to_handle or "").lower() == _handle(username)
 
 
+def load_topic_keywords() -> list[str]:
+    """读取 AI/科技 转发白名单；文件不存在则视为不过滤。"""
+    global _topic_keywords_cache
+    if _topic_keywords_cache is None:
+        from config import TWITTER_TOPICS_FILE
+
+        path = Path(TWITTER_TOPICS_FILE)
+        if not path.exists():
+            _topic_keywords_cache = []
+        else:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            raw = data if isinstance(data, list) else data.get("keywords", [])
+            _topic_keywords_cache = [str(x).strip() for x in raw if str(x).strip()]
+    return _topic_keywords_cache
+
+
+def thread_matches_topics(thread: list[Tweet], keywords: list[str]) -> bool:
+    """原帖、评论、引用里任一处命中关键词即视为 AI/科技相关。"""
+    if not keywords:
+        return True
+    blob = " ".join(
+        f"{t.text or ''} {t.quote_text or ''}" for t in thread
+    ).lower()
+    return any(kw.lower() in blob for kw in keywords)
+
+
 def should_forward(
     tweet: Tweet,
     username: str,
@@ -198,6 +227,7 @@ def pick_new_threads(
     *,
     include_replies: bool,
     include_retweets: bool,
+    topic_keywords: list[str] | None = None,
 ) -> list[list[Tweet]]:
     """有新内容的串推（原帖+回复自己的续帖合成一组），按原帖时间从旧到新。"""
     threads: list[list[Tweet]] = []
@@ -209,6 +239,8 @@ def pick_new_threads(
             include_replies=include_replies,
             include_retweets=include_retweets,
         ):
+            continue
+        if topic_keywords and not thread_matches_topics(thread, topic_keywords):
             continue
         if any(t.id not in seen_ids for t in thread):
             threads.append(thread)
@@ -288,6 +320,19 @@ if __name__ == "__main__":
 
         tweets = await fetch_timeline()
         print(f"# @{TWITTER_USERNAME} 共 {len(tweets)} 条")
+        if "--filter" in sys.argv:
+            keywords = load_topic_keywords()
+            print(f"# 主题词 {len(keywords)} 个，命中才转发\n")
+            for th in group_threads(tweets, TWITTER_USERNAME):
+                root = th[0]
+                if not should_forward(
+                    root, TWITTER_USERNAME, include_replies=False, include_retweets=True
+                ):
+                    continue
+                keep = thread_matches_topics(th, keywords)
+                preview = (root.text or "").replace("\n", " / ")[:70]
+                print(f"{'KEEP' if keep else 'SKIP'} {root.id}  {preview}")
+            return
         for t in tweets:
             flags = []
             if t.is_retweet:

@@ -16,6 +16,7 @@ from config import (
     TWITTER_INCLUDE_REPLIES,
     TWITTER_INCLUDE_RETWEETS,
     TWITTER_SCAN_INTERVAL,
+    TWITTER_TOPIC_FILTER,
     TWITTER_USERNAME,
 )
 from shop import scraper
@@ -196,7 +197,7 @@ async def scan_tweets_and_notify(first_run: bool = False) -> None:
         return
 
     from storage import twitter_state
-    from twitter.fetcher import fetch_timeline, pick_new_threads
+    from twitter.fetcher import fetch_timeline, load_topic_keywords, pick_new_threads
 
     logger.info(f"开始拉取 @{TWITTER_USERNAME} 的推文...")
     try:
@@ -216,13 +217,27 @@ async def scan_tweets_and_notify(first_run: bool = False) -> None:
         logger.info(f"推文快照建立：记下 {len(fetched_ids)} 条，启动后的新帖才会转发")
         return
 
+    topic_keywords = load_topic_keywords() if TWITTER_TOPIC_FILTER else []
     new_threads = pick_new_threads(
         tweets,
         set(old_ids),
         TWITTER_USERNAME,
         include_replies=TWITTER_INCLUDE_REPLIES,
         include_retweets=TWITTER_INCLUDE_RETWEETS,
+        topic_keywords=topic_keywords or None,
     )
+
+    if topic_keywords:
+        unfiltered = pick_new_threads(
+            tweets,
+            set(old_ids),
+            TWITTER_USERNAME,
+            include_replies=TWITTER_INCLUDE_REPLIES,
+            include_retweets=TWITTER_INCLUDE_RETWEETS,
+        )
+        skipped = len(unfiltered) - len(new_threads)
+        if skipped:
+            logger.info(f"主题过滤：跳过 {skipped} 组非 AI/科技帖")
 
     logger.info(
         f"推文扫描完成：时间线 {len(tweets)} 条，待转发 {len(new_threads)} 组"
