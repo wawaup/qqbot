@@ -128,7 +128,11 @@ async def test_skips_off_topic_chatter(monkeypatch, tmp_path):
             sent.append(thread[0].id)
 
     monkeypatch.setattr(tasks, "_bot_client", _Bot())
-    monkeypatch.setattr("twitter.fetcher.load_topic_keywords", lambda: ["gpt", "claude"])
+
+    async def fake_classify(text: str):
+        return "火锅" not in text
+
+    monkeypatch.setattr("twitter.classifier.is_worth_forwarding", fake_classify)
 
     async def fake_fetch(_username):
         return [
@@ -142,3 +146,32 @@ async def test_skips_off_topic_chatter(monkeypatch, tmp_path):
     await tasks.scan_tweets_and_notify(first_run=False)
     assert sent == ["3"]
     assert "2" in twitter_state.load_seen_ids()
+
+
+@pytest.mark.asyncio
+async def test_classifier_failure_retries_next_scan(monkeypatch, tmp_path):
+    monkeypatch.setattr(twitter_state, "_STATE_FILE", tmp_path / "twitter_state.json")
+    twitter_state.save_seen_ids(["1"], username="wawaup1024")
+    monkeypatch.setattr(tasks, "TWITTER_TOPIC_FILTER", True)
+
+    sent: list[str] = []
+
+    class _Bot:
+        async def send_tweet_notice(self, thread):
+            sent.append(thread[0].id)
+
+    monkeypatch.setattr(tasks, "_bot_client", _Bot())
+
+    async def fake_classify(_text: str):
+        return None
+
+    monkeypatch.setattr("twitter.classifier.is_worth_forwarding", fake_classify)
+
+    async def fake_fetch(_username):
+        return [_tweet("1"), _tweet("2", text="Claude 补货了")]
+
+    monkeypatch.setattr("twitter.fetcher.fetch_timeline", fake_fetch)
+
+    await tasks.scan_tweets_and_notify(first_run=False)
+    assert sent == []
+    assert "2" not in twitter_state.load_seen_ids()

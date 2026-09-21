@@ -22,7 +22,7 @@ uv run python -m shop.scraper
 # 验证 Twitter 时间线能否拉取（国内机器通常要先配 TWITTER_HTTP_PROXY）
 uv run python -m twitter.fetcher
 
-# 预览哪些帖会因主题过滤被跳过
+# 预览哪些帖会被模型判定为值得转发
 uv run python -m twitter.fetcher --filter
 
 # 启动机器人
@@ -48,8 +48,8 @@ qqbot/
 │   └── tasks.py             # APScheduler 定时扫描 + 通知调度
 ├── twitter/
 │   ├── models.py            # Tweet 数据类
-│   └── fetcher.py           # FxTwitter 时间线拉取 + 图片下载
-├── twitter_topics.json      # 推文转发主题白名单（AI/科技关键词）
+│   ├── fetcher.py           # FxTwitter 时间线拉取 + 图片下载
+│   └── classifier.py        # 截取前 150 字，用模型判断是否值得转发
 ├── storage/
 │   ├── state.py             # state.json 快照管理（合并式），diff_states() 检测新品/上架/补货
 │   └── twitter_state.py     # twitter_state.json，记录已处理的 tweet id
@@ -77,7 +77,11 @@ qqbot/
 | `TWITTER_HTTP_PROXY` | 访问 FxTwitter / 推文图的 HTTP 代理 | 空 |
 | `TWITTER_INCLUDE_RETWEETS` | 是否转发转推 | `true` |
 | `TWITTER_INCLUDE_REPLIES` | 是否转发回复别人的帖（自己的串推始终转发） | `false` |
-| `TWITTER_TOPIC_FILTER` | 是否只转发 AI/科技相关帖 | `true` |
+| `TWITTER_TOPIC_FILTER` | 是否用模型过滤闲聊/引流帖 | `true` |
+| `TWITTER_LLM_API_KEY` | 资讯过滤 API Key | 空 |
+| `TWITTER_LLM_API_BASE` | 资讯过滤网关 | `https://alpu.asia` |
+| `TWITTER_LLM_MODEL` | 资讯过滤模型 | `gemini-3.1-pro-low` |
+| `TWITTER_LLM_API_PROTOCOL` | `antigravity`/`anthropic` 走 Messages API，`openai` 走 Chat Completions | `antigravity` |
 
 ## 功能说明
 
@@ -149,10 +153,10 @@ qqbot/
 - 之后出现新 id 才发群：先 Markdown 文字（含原文、引用、链接），再逐张发图片（最多 4 张）
 - 推文图在 `pbs.twimg.com`，QQ 侧拉不到，所以由机器人本机下载后走 `file_data`（base64）上传
 - **默认转发**：原创、引用、转推；回复自己的帖会跟原帖合成一条（带「💬 追加评论」和时间）发出；**默认不转发**回复别人的帖
-- **主题过滤**：`TWITTER_TOPIC_FILTER=true` 时，原帖/评论/引用里至少命中 `twitter_topics.json` 一个关键词才转发，日常唠嗑跳过但仍记入已读；改词表后重启生效
+- **主题过滤**：`TWITTER_TOPIC_FILTER=true` 时，把原帖/评论/引用拼起来截取前 150 字，发给模型判断。知识贴、资讯贴（含补货/有货）、技术贴转发；闲聊、心情、为 X 账号涨粉引流的运营帖跳过，但仍记入已读。模型调用失败则本轮不发、不记已读，下轮重试。默认复用本机 Antigravity 网关（`TWITTER_LLM_API_PROTOCOL=antigravity`，模型 `gemini-3.1-pro-low`）
 - 只发原帖正文图片，不带评论里的图；正文里的 `#tag` 会去掉，避免 QQ Markdown 当成标题
 - 不受店铺 00:00–09:00 静默时段影响（发推频率低，且多是主动公告）
-- 国内阿里云访问 X / FxTwitter / `pbs.twimg.com` 通常被墙，需要在 `.env` 配 `TWITTER_HTTP_PROXY`（只代理推特流量，不影响店铺接口）
+- 国内阿里云访问 X / FxTwitter / `pbs.twimg.com` 通常被墙，需要在 `.env` 配 `TWITTER_HTTP_PROXY`（只代理推特流量，不影响店铺接口）。资讯过滤默认走本机 `alpu.asia` Antigravity 网关，不走这条代理
 - 视频帖发文字 + 封面图（若有），并提示点链接看视频
 
 ## 架构关键点
@@ -160,7 +164,7 @@ qqbot/
 - **爬虫**：页面有 WAF，使用 Playwright 无头 Chromium 渲染。`SELECTORS` 字典在 `shop/scraper.py` 顶部，页面改版只改这里。`--debug` 保存 `debug_shop.html`。
 - **库存快照**：`state.json` 保存上次扫描结果，合并式更新（下架商品保留记录、仅标记 `listed=False`，不删除），`diff_states()` 基于此做新品/上架/补货三态判定。
 - **Bot 依赖注入**：`scheduler/tasks.py` 的 `_bot_client` 由 `main.py` 通过 `set_bot_client()` 注入，避免循环导入。
-- **关键词缓存**：`keywords.json`、`category_commands.json` 和 `twitter_topics.json` 首次访问后缓存在内存，重启生效。
+- **关键词缓存**：`keywords.json` 和 `category_commands.json` 首次访问后缓存在内存，重启生效。
 - **jieba 预热**：`handlers.py` import 时调用 `jieba.initialize()`，避免首次查询阻塞事件循环。
 - **推文已读**：`twitter_state.json` 保存已处理的 tweet id（最多 300 条），重启后不会把旧帖再发一遍。
 

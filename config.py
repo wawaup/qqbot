@@ -34,9 +34,14 @@ TWITTER_API_BASE = os.getenv("TWITTER_API_BASE", "https://api.fxtwitter.com")
 TWITTER_HTTP_PROXY = os.getenv("TWITTER_HTTP_PROXY", "")  # 国内服务器访问 X 需要代理，如 http://127.0.0.1:7890
 TWITTER_INCLUDE_RETWEETS = os.getenv("TWITTER_INCLUDE_RETWEETS", "true").lower() == "true"
 TWITTER_INCLUDE_REPLIES = os.getenv("TWITTER_INCLUDE_REPLIES", "false").lower() == "true"  # 回复别人的帖；自己的串推始终转发
-# 只转发命中 twitter_topics.json 关键词的帖（AI/科技/店铺），日常唠嗑跳过
+# 只转发模型判定为知识/资讯/技术的帖，闲聊和引流跳过
 TWITTER_TOPIC_FILTER = os.getenv("TWITTER_TOPIC_FILTER", "true").lower() == "true"
-TWITTER_TOPICS_FILE = os.getenv("TWITTER_TOPICS_FILE", "twitter_topics.json")
+TWITTER_LLM_API_KEY = os.getenv("TWITTER_LLM_API_KEY", "")
+TWITTER_LLM_API_BASE = os.getenv("TWITTER_LLM_API_BASE", "https://alpu.asia")
+TWITTER_LLM_MODEL = os.getenv("TWITTER_LLM_MODEL", "gemini-3.1-pro-low")
+TWITTER_LLM_API_PROTOCOL = os.getenv("TWITTER_LLM_API_PROTOCOL", "antigravity")
+# None=未设置：本机/alpu.asia 直连，其它地址走 TWITTER_HTTP_PROXY；空字符串=强制直连
+TWITTER_LLM_HTTP_PROXY = os.getenv("TWITTER_LLM_HTTP_PROXY")
 
 # keywords.json 的 image 字段 → 图片直链映射
 PICS_URLS: dict[str, str] = {

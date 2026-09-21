@@ -197,7 +197,8 @@ async def scan_tweets_and_notify(first_run: bool = False) -> None:
         return
 
     from storage import twitter_state
-    from twitter.fetcher import fetch_timeline, load_topic_keywords, pick_new_threads
+    from twitter.classifier import is_worth_forwarding, preview_text
+    from twitter.fetcher import fetch_timeline, pick_new_threads
 
     logger.info(f"开始拉取 @{TWITTER_USERNAME} 的推文...")
     try:
@@ -217,27 +218,32 @@ async def scan_tweets_and_notify(first_run: bool = False) -> None:
         logger.info(f"推文快照建立：记下 {len(fetched_ids)} 条，启动后的新帖才会转发")
         return
 
-    topic_keywords = load_topic_keywords() if TWITTER_TOPIC_FILTER else []
     new_threads = pick_new_threads(
         tweets,
         set(old_ids),
         TWITTER_USERNAME,
         include_replies=TWITTER_INCLUDE_REPLIES,
         include_retweets=TWITTER_INCLUDE_RETWEETS,
-        topic_keywords=topic_keywords or None,
     )
 
-    if topic_keywords:
-        unfiltered = pick_new_threads(
-            tweets,
-            set(old_ids),
-            TWITTER_USERNAME,
-            include_replies=TWITTER_INCLUDE_REPLIES,
-            include_retweets=TWITTER_INCLUDE_RETWEETS,
-        )
-        skipped = len(unfiltered) - len(new_threads)
+    failed_ids: set[str] = set()
+    if TWITTER_TOPIC_FILTER:
+        kept = []
+        skipped = 0
+        for thread in new_threads:
+            preview = preview_text(thread)
+            verdict = await is_worth_forwarding(preview)
+            if verdict is True:
+                kept.append(thread)
+            elif verdict is False:
+                skipped += 1
+                logger.info(f"资讯过滤：跳过 {thread[0].id} {preview[:40]!r}")
+            else:
+                failed_ids.update(t.id for t in thread)
+                logger.warning(f"资讯过滤失败，下轮重试 {thread[0].id}")
         if skipped:
-            logger.info(f"主题过滤：跳过 {skipped} 组非 AI/科技帖")
+            logger.info(f"资讯过滤：跳过 {skipped} 组闲聊/引流帖")
+        new_threads = kept
 
     logger.info(
         f"推文扫描完成：时间线 {len(tweets)} 条，待转发 {len(new_threads)} 组"
@@ -249,8 +255,9 @@ async def scan_tweets_and_notify(first_run: bool = False) -> None:
             await _bot_client.send_tweet_notice(thread)
             await asyncio.sleep(0.5)
 
+    save_ids = [tid for tid in fetched_ids if tid not in failed_ids]
     twitter_state.save_seen_ids(
-        twitter_state.merge_seen(old_ids, fetched_ids),
+        twitter_state.merge_seen(old_ids, save_ids),
         username=TWITTER_USERNAME,
     )
 
