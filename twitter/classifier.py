@@ -21,10 +21,14 @@ SYSTEM_PROMPT = """你是 QQ 群资讯过滤器。判断这条 X/Twitter 帖子�
 - 知识贴：教程、用法、踩坑、经验、评测
 - 资讯贴：产品更新、行业新闻、政策变化、店铺补货/有货/缺货/价格/活动等对用户有用的信息
 - 技术贴：模型、API、工具、能力变化、技术细节
+- 短讯发布也要转：哪怕只有一句话，只要在宣布模型/产品上线、更新、故障、政策（例如「GPT-6来了」），不要当成无信息量短帖
+- 长文必须转：X 长文、博客、文章链接。正文几乎只有链接，或摘录里带「长文：」标题，也视为资讯，不要因为看起来像一条链接就跳过
+- 模型能力测试要转：针对具体模型的拷打、出题、对比，并且有测试过程或结果（即使题目很整活）。例如用 Codex Astra 跑一道题并说出对错
 
 不转发（NO）：
-- 闲聊、心情、日常、无信息量短帖
-- 主要为了给 X 账号涨粉、求互动、引流的运营帖（纯口号、求关注、空洞营销、互关互赞）
+- 闲聊、心情、日常；完全没有事件或主题的无信息量短帖（有发布事件的短讯不算这类）
+- 主要为了给 X 账号涨粉、求互动、引流的运营帖（纯口号、求关注、空洞营销、互关互赞、吐槽没流量）
+- AI 趣味互动不要转：好玩的提示词、让 Agent 填图/算命/根据「你了解我的一切」整活、跟风玩梗。没有补货、没有产品动态、没有可复用的技术信息，只是有趣，就当闲聊。例如「除了 AI 就是钱」+ 引用一个有趣提示词
 
 只根据给定摘录判断。只输出 YES 或 NO，不要解释。"""
 
@@ -35,11 +39,15 @@ _LOCAL_HOSTS = {"127.0.0.1", "localhost", "alpu.asia", "www.alpu.asia"}
 
 
 def preview_text(thread: list[Tweet], limit: int = PREVIEW_LIMIT) -> str:
-    """拼接原帖、评论、引用，截取前 limit 字给模型。"""
+    """拼接原帖、评论、引用和长文标题，截取前 limit 字给模型。"""
     parts: list[str] = []
     for tweet in thread:
         if tweet.text:
             parts.append(tweet.text.strip())
+        if tweet.article_title:
+            parts.append(f"长文：{tweet.article_title.strip()}")
+        if tweet.article_preview:
+            parts.append(tweet.article_preview.strip())
         if tweet.quote_text:
             parts.append(tweet.quote_text.strip())
     return "\n".join(parts)[:limit].strip()

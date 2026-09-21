@@ -6,6 +6,7 @@ from bot.formatter import format_tweet_notice
 from storage import twitter_state
 from twitter.fetcher import (
     group_threads,
+    parse_status,
     parse_timeline,
     pick_new_threads,
     pick_new_tweets,
@@ -38,6 +39,26 @@ def test_parse_original_with_photo(tweets):
         "https://pbs.twimg.com/media/HRVx-RgbMAANZyF.jpg?name=large"
     ]
     assert should_forward(t, USERNAME, include_replies=False, include_retweets=True)
+
+
+def test_parse_status_reads_article_title():
+    tweet = parse_status(
+        {
+            "type": "status",
+            "id": "1",
+            "url": "https://x.com/x/status/1",
+            "text": "https://x.com/i/article/99",
+            "created_timestamp": 1,
+            "author": {"screen_name": "wawaup1024", "name": "x"},
+            "article": {
+                "title": "持续更新：GPT 降智恢复方案",
+                "preview_text": "capacity 报错已经影响到很多用户",
+            },
+        }
+    )
+    assert tweet is not None
+    assert tweet.article_title == "持续更新：GPT 降智恢复方案"
+    assert "capacity" in tweet.article_preview
 
 
 def test_self_reply_is_forwarded(tweets):

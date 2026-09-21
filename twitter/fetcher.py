@@ -109,6 +109,10 @@ def parse_status(item: dict) -> Tweet | None:
     if not unique_photos and video_thumb:
         unique_photos = [video_thumb]
 
+    article = item.get("article") if isinstance(item.get("article"), dict) else {}
+    article_title = str(article.get("title") or "").strip()
+    article_preview = str(article.get("preview_text") or "").strip()
+
     return Tweet(
         id=tweet_id,
         url=item.get("url") or f"https://x.com/i/status/{tweet_id}",
@@ -125,6 +129,8 @@ def parse_status(item: dict) -> Tweet | None:
         photos=unique_photos,
         has_video=has_video,
         video_thumb=video_thumb,
+        article_title=article_title,
+        article_preview=article_preview,
     )
 
 

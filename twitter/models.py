@@ -18,3 +18,5 @@ class Tweet:
     photos: list[str] = field(default_factory=list)
     has_video: bool = False
     video_thumb: str = ""
+    article_title: str = ""
+    article_preview: str = ""

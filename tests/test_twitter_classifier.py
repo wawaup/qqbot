@@ -29,6 +29,27 @@ def test_preview_text_truncates_to_150_and_includes_comment_quote():
     assert preview_text([quoted]).endswith("C" * 40)
 
 
+def test_prompt_skips_fun_prompts_keeps_real_evals():
+    from twitter.classifier import SYSTEM_PROMPT
+
+    assert "好玩的提示词" in SYSTEM_PROMPT
+    assert "Codex Astra" in SYSTEM_PROMPT
+    assert "AI 趣味互动不要转" in SYSTEM_PROMPT
+
+
+def test_preview_text_includes_article_title():
+    tweet = _tweet(
+        "1",
+        "https://x.com/i/article/123",
+        article_title="持续更新：GPT 降智恢复方案",
+        article_preview="capacity 报错已经影响到很多用户",
+    )
+    preview = preview_text([tweet])
+    assert preview.startswith("https://x.com/i/article/123")
+    assert "长文：持续更新：GPT 降智恢复方案" in preview
+    assert "capacity 报错" in preview
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [

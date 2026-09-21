@@ -153,7 +153,7 @@ qqbot/
 - 之后出现新 id 才发群：先 Markdown 文字（含原文、引用、链接），再逐张发图片（最多 4 张）
 - 推文图在 `pbs.twimg.com`，QQ 侧拉不到，所以由机器人本机下载后走 `file_data`（base64）上传
 - **默认转发**：原创、引用、转推；回复自己的帖会跟原帖合成一条（带「💬 追加评论」和时间）发出；**默认不转发**回复别人的帖
-- **主题过滤**：`TWITTER_TOPIC_FILTER=true` 时，把原帖/评论/引用拼起来截取前 150 字，发给模型判断。知识贴、资讯贴（含补货/有货）、技术贴转发；闲聊、心情、为 X 账号涨粉引流的运营帖跳过，但仍记入已读。模型调用失败则本轮不发、不记已读，下轮重试。默认复用本机 Antigravity 网关（`TWITTER_LLM_API_PROTOCOL=antigravity`，模型 `gemini-3.1-pro-low`）
+- **主题过滤**：`TWITTER_TOPIC_FILTER=true` 时，把原帖/评论/引用/长文标题拼起来截取前 150 字，发给模型判断。知识贴、资讯贴（含补货/有货、短讯发布）、技术贴、长文、针对具体模型且有结果的能力测试转发；闲聊、好玩提示词/整活互动、为 X 账号涨粉引流的运营帖跳过，但仍记入已读。模型调用失败则本轮不发、不记已读，下轮重试。默认复用本机 Antigravity 网关（`TWITTER_LLM_API_PROTOCOL=antigravity`，模型 `gemini-3.1-pro-low`）
 - 只发原帖正文图片，不带评论里的图；正文里的 `#tag` 会去掉，避免 QQ Markdown 当成标题
 - 不受店铺 00:00–09:00 静默时段影响（发推频率低，且多是主动公告）
 - 国内阿里云访问 X / FxTwitter / `pbs.twimg.com` 通常被墙，需要在 `.env` 配 `TWITTER_HTTP_PROXY`（只代理推特流量，不影响店铺接口）。资讯过滤默认走本机 `alpu.asia` Antigravity 网关，不走这条代理
