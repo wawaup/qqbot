@@ -35,6 +35,10 @@ def test_prompt_skips_fun_prompts_keeps_real_evals():
     assert "好玩的提示词" in SYSTEM_PROMPT
     assert "Codex Astra" in SYSTEM_PROMPT
     assert "AI 趣味互动不要转" in SYSTEM_PROMPT
+    assert "X 账号赚钱/分成不要转" in SYSTEM_PROMPT
+    assert "开通收益一次结算领不到低保" in SYSTEM_PROMPT
+    assert "不要因为出现 AI" in SYSTEM_PROMPT
+    assert "先分析帖子实际在讲什么" in SYSTEM_PROMPT
 
 
 def test_preview_text_includes_article_title():
