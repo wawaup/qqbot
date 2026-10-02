@@ -1,0 +1,16 @@
+[Unit]
+Description=alpu authenticated SOCKS5 for fingerprint browsers
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=/opt/alpu-proxy/socks.env
+ExecStart=/opt/alpu-proxy/start-socks.sh
+Restart=on-failure
+RestartSec=3
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
