@@ -491,6 +491,9 @@ class BotHandlers(botpy.Client):
         from bot.formatter import format_price_drop_notice
         await self._dm_owners(format_price_drop_notice(drops), "降价通知")
 
+    async def send_cpa_alert(self, text: str) -> None:
+        await self._dm_owners(text, "CPA告警")
+
     async def send_price_drop_test(self) -> None:
         from shop.models import Product
         sample = Product(

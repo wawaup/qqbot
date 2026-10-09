@@ -12,7 +12,7 @@ import botpy
 
 from bot.handlers import BotHandlers
 from config import BOT_APPID, BOT_SECRET, SANDBOX
-from scheduler.tasks import create_scheduler, scan_and_notify, scan_tweets_and_notify, set_bot_client
+from scheduler.tasks import create_scheduler, scan_and_notify, scan_cpa_auth_alerts, scan_tweets_and_notify, set_bot_client
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class App(BotHandlers):
             logger.info(f"定时扫描已启动，商店间隔 {SCAN_INTERVAL} 秒{extra}")
             await scan_and_notify(first_run=True)
             await scan_tweets_and_notify(first_run=True)
+            await scan_cpa_auth_alerts()
             if PRICE_DROP_TEST:
                 logger.info("PRICE_DROP_TEST=true，发送一条降价测试私聊")
                 await self.send_price_drop_test()

@@ -2,7 +2,9 @@
 定时扫描任务：每 SCAN_INTERVAL 秒扫描店铺，检测上新/上架/补货并通知 QQ 群。
 """
 import asyncio
+import json
 import logging
+from pathlib import Path
 from datetime import datetime, timezone, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -309,6 +311,122 @@ async def scan_tweets_and_notify(first_run: bool = False) -> None:
     )
 
 
+
+_CPA_AUTH_DIR = Path("/opt/cliproxyapi/auths")
+_CPA_ALERT_STATE = Path("/root/qqbot/cpa_alert_state.json")
+_EGRESS_HEALTH = Path("/root/.config/mihomo/antigravity-egress-health.json")
+# 同一件事 12 小时内只提醒一次；问题消失后再出现会重新提醒。
+_CPA_ALERT_COOLDOWN = timedelta(hours=12)
+# 令牌过期后给 CPA 留时间自己刷新，节点刚恢复时常要等一会儿。
+_CPA_TOKEN_GRACE = timedelta(minutes=30)
+# 出口检查每 30 分钟跑一次，超过这个时间没更新说明定时器停了。
+_EGRESS_STALE = timedelta(minutes=90)
+
+
+def _cpa_alert_state() -> dict:
+    try:
+        data = json.loads(_CPA_ALERT_STATE.read_text())
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_cpa_alert_state(data: dict) -> None:
+    _CPA_ALERT_STATE.write_text(json.dumps(data, ensure_ascii=False))
+
+
+def _cpa_alert_items(now: datetime) -> list[tuple[str, str]]:
+    """只列需要人工处理的事：换订阅、重新登录、出口检查停了。"""
+    items: list[tuple[str, str]] = []
+    node_bad = False
+    try:
+        health = json.loads(_EGRESS_HEALTH.read_text())
+    except Exception:
+        health = None
+    if not isinstance(health, dict):
+        items.append(("egress:missing", "- 出口检查没有结果，换线定时器可能没在跑（antigravity-egress-failover.timer）"))
+    else:
+        try:
+            updated = datetime.fromisoformat(str(health.get("updated_at")))
+            if now - updated > _EGRESS_STALE:
+                minutes = int((now - updated).total_seconds() // 60)
+                items.append(("egress:stale", f"- 出口检查已经 {minutes} 分钟没跑了（antigravity-egress-failover.timer）"))
+        except ValueError:
+            pass
+        slots = health.get("slots") or {}
+        exhausted = [str(s.get("email")) for s in slots.values() if isinstance(s, dict) and s.get("status") == "exhausted"]
+        if health.get("subscription_dead") or exhausted:
+            node_bad = True
+            reasons = []
+            if health.get("subscription_dead"):
+                reasons.append(f"美国节点能解析的只剩 {health.get('us_resolvable')}/{health.get('us_nodes')}")
+            if exhausted:
+                reasons.append("、".join(exhausted) + " 换遍候选节点都不通")
+            items.append((
+                "egress:subscription",
+                "- 节点大面积不可用（" + "；".join(reasons) + "）。请从订阅网页下载新的 Clash 配置，"
+                "在 shop-tool 里运行 deploy/aliyun-relay/push_subscription.sh，或把文件交给 Claude。"
+                "节点恢复后令牌一般会自己刷新，不用重新登录。",
+            ))
+    if _CPA_AUTH_DIR.is_dir():
+        for path in sorted(_CPA_AUTH_DIR.glob("*.json")):
+            try:
+                data = json.loads(path.read_text())
+            except Exception as e:
+                logger.warning("CPA 凭证读取失败 %s: %s", path.name, e)
+                continue
+            email = str(data.get("email") or path.stem)
+            if data.get("disabled"):
+                items.append((email + ":disabled", f"- {email} 在 CPA 里被禁用了，需要重新登录或启用"))
+                continue
+            try:
+                exp = datetime.fromisoformat(str(data.get("expired") or ""))
+            except ValueError:
+                continue
+            if exp.tzinfo is None:
+                exp = exp.replace(tzinfo=CST)
+            # 节点坏了刷不了令牌，归到上面换订阅那条，不让你白白重新登录。
+            if node_bad or now - exp < _CPA_TOKEN_GRACE:
+                continue
+            when = exp.astimezone(CST).strftime("%m-%d %H:%M")
+            items.append((email + ":relogin", f"- {email} 访问令牌 {when} 过期后一直没刷新上，节点是通的，需要在 CPA 重新登录这个号"))
+    return items
+
+
+async def scan_cpa_auth_alerts() -> None:
+    """需要人工处理时私聊店主。每 30 分钟查一次，同一件事 12 小时内只发一次。"""
+    if _bot_client is None:
+        return
+    now = datetime.now(CST)
+    items = _cpa_alert_items(now)
+    state = _cpa_alert_state()
+    notified = state.get("notified") if isinstance(state.get("notified"), dict) else {}
+    current = {key for key, _line in items}
+    # 已经解决的事从记录里去掉，下次再出现会重新提醒。
+    notified = {key: at for key, at in notified.items() if key in current}
+    due = []
+    for key, _line in items:
+        try:
+            last = datetime.fromisoformat(str(notified.get(key)))
+        except ValueError:
+            last = None
+        if last is None or now - last >= _CPA_ALERT_COOLDOWN:
+            due.append(key)
+    if not due:
+        _save_cpa_alert_state({"notified": notified})
+        return
+    text = "# CPA 需要处理\n\n" + "\n".join(line for _key, line in items)
+    try:
+        await _bot_client.send_cpa_alert(text)
+    except Exception as e:
+        logger.error("CPA 告警发送失败: %s", e)
+        return
+    for key in current:
+        notified[key] = now.isoformat()
+    _save_cpa_alert_state({"notified": notified})
+    logger.info("CPA 告警已私聊，%s 条", len(items))
+
+
 def create_scheduler() -> AsyncIOScheduler:
     scheduler = AsyncIOScheduler()
     scheduler.add_job(
@@ -326,6 +444,14 @@ def create_scheduler() -> AsyncIOScheduler:
         minute=0,
         timezone=CST,
         id="daily_digest",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        scan_cpa_auth_alerts,
+        trigger="interval",
+        seconds=1800,
+        id="cpa_auth_alert",
         replace_existing=True,
         max_instances=1,
     )
