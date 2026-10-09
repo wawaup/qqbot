@@ -8,11 +8,15 @@ if TYPE_CHECKING:
     from twitter.models import Tweet
 
 
-def _price_sort_key(p: "Product") -> float:
+def _price_sort_key_raw(raw) -> float:
     try:
-        return float(p.price)
+        return float(raw)
     except (TypeError, ValueError):
         return float("inf")
+
+
+def _price_sort_key(p: "Product") -> float:
+    return _price_sort_key_raw(p.price)
 
 
 def sort_by_price(items: list) -> list:
@@ -123,6 +127,21 @@ def format_new_product_notice(products: list["Product"]) -> str:
     lines = ["# 🆕 新品上架"]
     for p in products:
         lines.append(_notice_line(p))
+    return "\n".join(lines)
+
+
+def format_price_drop_notice(drops: list[tuple["Product", str]]) -> str:
+    lines = ["# 📉 商品降价", "", "有商品价格下调，请核对成本。"]
+    for i, (p, old_price) in enumerate(drops, 1):
+        extra = ""
+        old_value = _price_sort_key_raw(old_price)
+        new_value = _price_sort_key(p)
+        if old_value != float("inf") and new_value != float("inf"):
+            extra = f"（-{old_value - new_value:g}r）"
+        lines.append(f"\n{i}. **{p.title}**")
+        lines.append(f"   原价 {old_price}r → 现价 {p.price}r{extra}")
+        if p.url:
+            lines.append(f"   {p.url}")
     return "\n".join(lines)
 
 

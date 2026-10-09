@@ -30,11 +30,14 @@ class App(BotHandlers):
         if not App._initialized:
             App._initialized = True
             _scheduler.start()
-            from config import SCAN_INTERVAL, TWITTER_ENABLED, TWITTER_SCAN_INTERVAL
+            from config import PRICE_DROP_TEST, SCAN_INTERVAL, TWITTER_ENABLED, TWITTER_SCAN_INTERVAL
             extra = f"，推文间隔 {TWITTER_SCAN_INTERVAL} 秒" if TWITTER_ENABLED else ""
             logger.info(f"定时扫描已启动，商店间隔 {SCAN_INTERVAL} 秒{extra}")
             await scan_and_notify(first_run=True)
             await scan_tweets_and_notify(first_run=True)
+            if PRICE_DROP_TEST:
+                logger.info("PRICE_DROP_TEST=true，发送一条降价测试私聊")
+                await self.send_price_drop_test()
         else:
             logger.info("重连成功，调度器继续运行")
 

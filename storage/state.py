@@ -81,3 +81,34 @@ def diff_states(
         elif not prev.get("in_stock", True):
             restocked_products.append(product)
     return new_products, relisted_products, restocked_products
+
+
+def _as_price(raw) -> float | None:
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    if value != value:  # NaN
+        return None
+    return value
+
+
+def diff_price_drops(
+    old: dict[str, dict],
+    new: dict[str, "Product"],
+    min_delta: float = 5,
+) -> list[tuple["Product", str]]:
+    """返回 [(当前商品, 旧价格字符串), ...]，仅包含降价幅度达到 min_delta 的商品。"""
+    drops: list[tuple["Product", str]] = []
+    for pid, product in new.items():
+        prev = old.get(pid)
+        if prev is None:
+            continue
+        old_price = prev.get("price", "")
+        old_value = _as_price(old_price)
+        new_value = _as_price(product.price)
+        if old_value is None or new_value is None:
+            continue
+        if old_value - new_value >= min_delta:
+            drops.append((product, str(old_price)))
+    return drops

@@ -470,6 +470,39 @@ class BotHandlers(botpy.Client):
     async def send_daily_digest(self, events: list) -> None:
         await self._broadcast(format_daily_digest(events), "每日汇总", len(events))
 
+    async def _dm_owners(self, text: str, label: str) -> None:
+        from config import OWNER_USER_OPENIDS
+        if not OWNER_USER_OPENIDS:
+            logger.warning("OWNER_USER_OPENIDS 未配置，无法发送%s", label)
+            return
+        for openid in OWNER_USER_OPENIDS:
+            tag = f"{openid[:6]}..."
+            try:
+                await self.api.post_c2c_message(
+                    openid=openid,
+                    msg_type=2,
+                    markdown=msg_types.MarkdownPayload(content=text),
+                )
+                logger.info(f"[{tag}] {label}已私聊发送")
+            except Exception as e:
+                logger.error(f"[{tag}] {label}私聊失败: {e}")
+
+    async def send_price_drop_notice(self, drops: list) -> None:
+        from bot.formatter import format_price_drop_notice
+        await self._dm_owners(format_price_drop_notice(drops), "降价通知")
+
+    async def send_price_drop_test(self) -> None:
+        from shop.models import Product
+        sample = Product(
+            id="price-drop-test",
+            title="【测试】降价私聊通道",
+            url="https://wzyp.cn/shop/manboup",
+            category="测试",
+            in_stock=True,
+            price="80",
+        )
+        await self.send_price_drop_notice([(sample, "100")])
+
     async def _upload_group_image(self, group_openid: str, image_bytes: bytes):
         """botpy 的 post_group_file 只接受 url，这里走 QQ 原生 file_data（base64）上传。
 

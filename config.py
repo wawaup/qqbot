@@ -7,8 +7,22 @@ BOT_APPID = os.getenv("BOT_APPID", "")
 BOT_SECRET = os.getenv("BOT_SECRET", "")
 BOT_OPENID = os.getenv("BOT_OPENID", "")  # 机器人在群里的 member openid，用于过滤 @自己
 
+def _openid_list(name: str) -> list[str]:
+    return [g.strip() for g in os.getenv(name, "").split(",") if g.strip()]
+
+
 # 支持多群：逗号分隔，如 "openid1,openid2"
-GROUP_OPENIDS = [g.strip() for g in os.getenv("GROUP_OPENIDS", "").split(",") if g.strip()]
+GROUP_OPENIDS = _openid_list("GROUP_OPENIDS")
+# 降价通知私聊对象；未填时回退到 CONTENT_CHANGE_USER_OPENIDS
+OWNER_USER_OPENIDS = _openid_list("OWNER_USER_OPENIDS") or _openid_list(
+    "CONTENT_CHANGE_USER_OPENIDS"
+)
+# 启动后发一条测试私聊，测通后关掉
+PRICE_DROP_TEST = os.getenv("PRICE_DROP_TEST", "false").lower() == "true"
+# 降价幅度小于该金额（元）不提醒
+PRICE_DROP_MIN_DELTA = float(os.getenv("PRICE_DROP_MIN_DELTA", "5"))
+# 降价达到门槛后，这么多秒内拦截该商品的群补货通知
+PRICE_DROP_RESTOCK_BLOCK_SECONDS = int(os.getenv("PRICE_DROP_RESTOCK_BLOCK_SECONDS", "600"))
 
 SHOP_URL = os.getenv("SHOP_URL", "https://wzyp.cn/shop/manboup")
 SCAN_INTERVAL = int(os.getenv("SCAN_INTERVAL", "60"))

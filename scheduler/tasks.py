@@ -10,6 +10,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from config import (
     NOTIFY_COOLDOWN,
     NOTIFY_EXCLUDE_CATEGORIES,
+    PRICE_DROP_MIN_DELTA,
+    PRICE_DROP_RESTOCK_BLOCK_SECONDS,
     SCAN_INTERVAL,
     SHOP_URL,
     TWITTER_ENABLED,
@@ -44,6 +46,9 @@ _notify_cooldown: dict[str, datetime] = {}
 # key: product.id，同一商品多次触发时后写覆盖先写，天然去重
 _quiet_buffer: dict[str, tuple] = {}
 
+# 显著降价后短时间内拦截群补货，防止降价+补货被薅
+_price_drop_block: dict[str, datetime] = {}
+
 
 def _is_on_cooldown(product_id: str) -> bool:
     last = _notify_cooldown.get(product_id)
@@ -61,6 +66,37 @@ def _mark_notified(products: list) -> None:
 def _filter_cooldown(products: list) -> list:
     """过滤掉仍在冷却期内的商品，返回可以通知的商品列表。"""
     return [p for p in products if not _is_on_cooldown(p.id)]
+
+
+def _mark_price_drop_block(drops: list) -> None:
+    now = datetime.now(CST)
+    for item in drops:
+        product = item[0] if isinstance(item, tuple) else item
+        _price_drop_block[product.id] = now
+
+
+def _is_restock_blocked(product_id: str) -> bool:
+    last = _price_drop_block.get(product_id)
+    if last is None:
+        return False
+    return (datetime.now(CST) - last).total_seconds() < PRICE_DROP_RESTOCK_BLOCK_SECONDS
+
+
+def _filter_restock_after_price_drop(products: list) -> list:
+    """降价达到门槛后的窗口期内，拦截该商品的群补货通知。"""
+    kept: list = []
+    blocked: list = []
+    for p in products:
+        if _is_restock_blocked(p.id):
+            blocked.append(p)
+        else:
+            kept.append(p)
+    if blocked:
+        logger.info(
+            f"降价后拦截补货群通知：{len(blocked)} 个商品"
+            f"（{PRICE_DROP_RESTOCK_BLOCK_SECONDS}s 内）"
+        )
+    return kept
 
 
 def _buffer_quiet_events(new_products: list, relisted_products: list, restocked_products: list) -> None:
@@ -101,13 +137,17 @@ async def scan_and_notify(first_run: bool = False) -> None:
         return
 
     new_products, relisted_products, restocked_products = state.diff_states(old_state, current_products)
+    price_drops = state.diff_price_drops(
+        old_state, current_products, min_delta=PRICE_DROP_MIN_DELTA
+    )
+    _mark_price_drop_block(price_drops)
 
     def _exclude(products: list) -> list:
         return [p for p in products if p.category_id not in NOTIFY_EXCLUDE_CATEGORIES]
 
     new_products = _exclude(new_products)
     relisted_products = _exclude(relisted_products)
-    restocked_products = _exclude(restocked_products)
+    restocked_products = _filter_restock_after_price_drop(_exclude(restocked_products))
 
     state.save_state(current_products)
 
@@ -125,12 +165,17 @@ async def scan_and_notify(first_run: bool = False) -> None:
 
     logger.info(
         f"扫描完成：共 {len(current_products)} 个商品，有货 {in_stock_count} 个，"
-        f"新品 {len(new_products)} 个，上架 {len(relisted_products)} 个，补货 {len(restocked_products)} 个"
+        f"新品 {len(new_products)} 个，上架 {len(relisted_products)} 个，"
+        f"补货 {len(restocked_products)} 个，降价 {len(price_drops)} 个"
     )
 
-    # 静默时段只更新快照和冷却状态，不发通知；事件缓冲起来，09:00 由 daily_digest job 统一汇总
+    # 降价只私聊店主，不受群静默时段影响
+    if _bot_client is not None and price_drops:
+        await _bot_client.send_price_drop_notice(price_drops)
+
+    # 静默时段只更新快照和冷却状态，不发群通知；事件缓冲起来，09:00 由 daily_digest job 统一汇总
     if _in_quiet_hours():
-        logger.debug("静默时段，跳过通知，缓冲事件")
+        logger.debug("静默时段，跳过群通知，缓冲事件")
         _buffer_quiet_events(new_products, relisted_products, restocked_products)
         return
 
@@ -152,6 +197,8 @@ def _revalidate_buffered_events(buffered: list[tuple[str, "Product"]]) -> list[t
     for event_type, product in buffered:
         entry = current_state.get(product.id)
         if entry is None or not entry.get("listed", True) or not entry.get("in_stock", False):
+            continue
+        if event_type == "restocked" and _is_restock_blocked(product.id):
             continue
         events.append((event_type, Product(
             id=product.id,
